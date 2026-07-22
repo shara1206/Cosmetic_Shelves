@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#c96f8b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cosmetics">
+<title>Cosmetic Inventory</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22512%22%20height%3D%22512%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%22110%22%20fill%3D%22%23c96f8b%22%2F%3E%3Ctext%20x%3D%22256%22%20y%3D%22300%22%20font-size%3D%22300%22%20text-anchor%3D%22middle%22%3E%F0%9F%92%84%3C%2Ftext%3E%3C%2Fsvg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22512%22%20height%3D%22512%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%22110%22%20fill%3D%22%23c96f8b%22%2F%3E%3Ctext%20x%3D%22256%22%20y%3D%22300%22%20font-size%3D%22300%22%20text-anchor%3D%22middle%22%3E%F0%9F%92%84%3C%2Ftext%3E%3C%2Fsvg%3E">
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Cosmetic%20Inventory%22%2C%22short_name%22%3A%22Cosmetics%22%2C%22start_url%22%3A%22.%22%2C%22scope%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22orientation%22%3A%22portrait%22%2C%22background_color%22%3A%22%23faf6f5%22%2C%22theme_color%22%3A%22%23c96f8b%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2522http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2522%2520width%253D%2522512%2522%2520height%253D%2522512%2522%253E%253Crect%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520rx%253D%2522110%2522%2520fill%253D%2522%2523c96f8b%2522%252F%253E%253Ctext%2520x%253D%2522256%2522%2520y%253D%2522300%2522%2520font-size%253D%2522300%2522%2520text-anchor%253D%2522middle%2522%253E%25F0%259F%2592%2584%253C%252Ftext%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22purpose%22%3A%22any%20maskable%22%7D%5D%7D">
+<style>
+  :root{
+    --pink:#c96f8b; --pink-dark:#a8506d; --bg:#faf6f5; --card:#ffffff;
+    --ink:#2b2530; --muted:#8a8290; --line:#efe6e9;
+    --red:#e05656; --amber:#e0a13a; --green:#3fa66a;
+    --shadow:0 2px 10px rgba(120,80,100,.08);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    background:var(--bg);color:var(--ink);padding-bottom:76px;font-size:15px}
+  header{position:sticky;top:0;z-index:20;background:var(--pink);color:#fff;
+    padding:14px 16px;box-shadow:var(--shadow)}
+  header h1{margin:0;font-size:18px;font-weight:600;letter-spacing:.2px}
+  header .sub{font-size:12px;opacity:.85;margin-top:2px}
+  .wrap{max-width:640px;margin:0 auto;padding:14px}
+  /* dashboard */
+  .stats{display:flex;gap:10px;margin-bottom:14px}
+  .stat{flex:1;background:var(--card);border-radius:14px;padding:12px;text-align:center;box-shadow:var(--shadow)}
+  .stat .n{font-size:22px;font-weight:700}
+  .stat .l{font-size:11px;color:var(--muted);margin-top:2px}
+  .stat.red .n{color:var(--red)} .stat.amber .n{color:var(--amber)} .stat.green .n{color:var(--green)}
+  /* controls */
+  .controls{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  input,select,textarea{font-family:inherit;font-size:15px}
+  .search{flex:1;min-width:140px;padding:10px 12px;border:1px solid var(--line);
+    border-radius:10px;background:#fff}
+  .filter{padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  /* card */
+  .item{background:var(--card);border-radius:14px;padding:12px;margin-bottom:10px;
+    box-shadow:var(--shadow);display:flex;gap:12px;position:relative;overflow:hidden}
+  .item .flag{position:absolute;left:0;top:0;bottom:0;width:5px}
+  .flag.red{background:var(--red)} .flag.amber{background:var(--amber)}
+  .flag.green{background:var(--green)} .flag.gray{background:#ccc}
+  .thumb{width:64px;height:64px;border-radius:10px;object-fit:cover;background:#f0e8ec;flex:none}
+  .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:24px}
+  .meta{flex:1;min-width:0}
+  .meta .brand{font-size:12px;color:var(--pink-dark);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+  .meta .name{font-weight:600;margin:1px 0 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta .tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+  .tag{font-size:11px;background:#f3ebef;color:#7a6a74;padding:2px 8px;border-radius:20px}
+  .exp{font-size:12px;font-weight:600}
+  .exp.red{color:var(--red)} .exp.amber{color:var(--amber)} .exp.green{color:var(--green)} .exp.gray{color:var(--muted)}
+  .empty{text-align:center;color:var(--muted);padding:50px 20px}
+  .empty .big{font-size:44px;margin-bottom:10px}
+  /* fab */
+  .fab{position:fixed;right:18px;bottom:18px;width:58px;height:58px;border-radius:50%;
+    background:var(--pink);color:#fff;border:none;font-size:30px;box-shadow:0 6px 18px rgba(180,90,120,.4);
+    z-index:30;display:flex;align-items:center;justify-content:center}
+  /* modal */
+  .modal{position:fixed;inset:0;background:rgba(30,20,28,.45);z-index:40;display:none;
+    align-items:flex-end;justify-content:center}
+  .modal.open{display:flex}
+  .sheet{background:var(--bg);width:100%;max-width:640px;max-height:94vh;overflow-y:auto;
+    border-radius:20px 20px 0 0;padding:18px 16px 30px}
+  .sheet h2{margin:0 0 14px;font-size:17px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .field input,.field select,.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);
+    border-radius:10px;background:#fff}
+  .row2{display:flex;gap:10px}
+  .row2>.field{flex:1}
+  /* photo capture */
+  .photos{display:flex;gap:10px;margin-bottom:13px}
+  .photobox{flex:1;position:relative}
+  .photobox label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .photobtn{width:100%;aspect-ratio:1;border:2px dashed var(--line);border-radius:12px;background:#fff;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--muted);
+    cursor:pointer;overflow:hidden;padding:0}
+  .photobtn img{width:100%;height:100%;object-fit:cover}
+  .photobtn .ic{font-size:26px} .photobtn .t{font-size:11px;margin-top:4px}
+  .photobox input{display:none}
+  /* brand picker chips */
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{font-size:12px;padding:5px 10px;border-radius:20px;background:#fff;border:1px solid var(--line);cursor:pointer}
+  .chip.on{background:var(--pink);color:#fff;border-color:var(--pink)}
+  .chip.hidden-chip{opacity:.5;text-decoration:line-through}
+  .chip.hidden-chip.on{opacity:.5}
+  .btns{display:flex;gap:10px;margin-top:8px}
+  .btn{flex:1;padding:13px;border-radius:12px;border:none;font-size:15px;font-weight:600;cursor:pointer}
+  .btn.primary{background:var(--pink);color:#fff}
+  .btn.ghost{background:#fff;color:var(--muted);border:1px solid var(--line)}
+  .btn.danger{background:#fff;color:var(--red);border:1px solid #f2d2d2;flex:none;padding:13px 16px}
+  .hint{font-size:11px;color:var(--muted);margin-top:4px}
+  .detailrow{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .detailrow .k{color:var(--muted)}
+  .bigphoto{width:100%;border-radius:12px;margin-bottom:10px}
+</style>
+</head>
+<body>
+<header>
+  <button id="menuBtn" style="position:absolute;right:14px;top:14px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:10px;padding:8px 12px;font-size:16px">⚙</button>
+  <h1>💄 Cosmetic Inventory</h1>
+  <div class="sub">Track expiry · sort by date · US &amp; JP brands</div>
+</header>
+
+<div class="wrap">
+  <div class="stats" id="stats"></div>
+  <div class="controls">
+    <input class="search" id="search" placeholder="Search name or brand…">
+    <select class="filter" id="filter"><option value="">All types</option></select>
+    <select class="filter" id="sort">
+      <option value="expiry">Expiry ↑</option>
+      <option value="name">Name</option>
+      <option value="brand">Brand</option>
+    </select>
+  </div>
+  <div id="list"></div>
+</div>
+
+<button class="fab" id="addBtn">+</button>
+
+<!-- Add / Edit modal -->
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h2 id="sheetTitle">Add product</h2>
+    <div class="photos">
+      <div class="photobox">
+        <label>Product / barcode photo</label>
+        <button class="photobtn" id="p1btn"><span class="ic">📷</span><span class="t">Take photo</span></button>
+        <input type="file" id="p1" accept="image/*" capture="environment">
+      </div>
+      <div class="photobox">
+        <label>Lot number / date photo</label>
+        <button class="photobtn" id="p2btn"><span class="ic">🔎</span><span class="t">Take photo</span></button>
+        <input type="file" id="p2" accept="image/*" capture="environment">
+      </div>
+    </div>
+    <div class="hint" style="margin-top:-6px;margin-bottom:8px">Tip: 2nd photo is for reading the lot code &amp; expiry.</div>
+    <button type="button" class="btn ghost" id="ocrBtn" style="width:100%;margin-bottom:6px">🔎 Read lot &amp; date from 2nd photo</button>
+    <div class="hint" id="ocrStatus" style="margin-bottom:12px"></div>
+
+    <div class="field">
+      <label>Brand <button type="button" id="brandManageBtn" style="float:right;background:none;border:none;color:var(--pink-dark);font-size:12px;font-weight:600;cursor:pointer;padding:0">Manage</button></label>
+      <input id="fBrand" placeholder="Type or tap a brand below">
+      <div class="hint" id="brandManageHint" style="display:none;margin-top:4px">Tap a brand to hide/unhide it. Hidden brands won't show in the picker.</div>
+      <div class="chips" id="brandChips"></div>
+    </div>
+    <div class="field">
+      <label>Product name</label>
+      <input id="fName" placeholder="e.g. Hydrating Toner">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Category</label>
+        <select id="fCat"></select>
+      </div>
+      <div class="field" id="typeField">
+        <label>Skincare type</label>
+        <select id="fType"></select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Expiry date</label>
+        <input type="date" id="fExpiry">
+      </div>
+      <div class="field">
+        <label>Status</label>
+        <select id="fStatus">
+          <option value="sealed">Sealed</option>
+          <option value="open">Open</option>
+          <option value="finished">Finished</option>
+        </select>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Opened date (for PAO)</label>
+        <input type="date" id="fOpened">
+      </div>
+      <div class="field">
+        <label>PAO — months after open</label>
+        <select id="fPao">
+          <option value="">—</option>
+          <option>3</option><option>6</option><option>9</option><option>12</option>
+          <option>18</option><option>24</option><option>36</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:-6px;margin-bottom:12px">No printed expiry? Set the open date + PAO (the open-jar “12M” symbol) and the app computes expiry.</div>
+    <div class="row2">
+      <div class="field">
+        <label>Lot / batch number</label>
+        <input id="fLot" placeholder="from 2nd photo">
+      </div>
+      <div class="field">
+        <label>Quantity</label>
+        <input type="number" id="fQty" value="1" min="1">
+      </div>
+    </div>
+    <div class="field">
+      <label>Barcode</label>
+      <div style="display:flex;gap:8px">
+        <input id="fBarcode" placeholder="EAN/UPC" style="flex:1">
+        <button type="button" class="btn primary" id="scanBtn" style="flex:none;padding:11px 14px">📷 Scan</button>
+      </div>
+      <div class="hint" id="lookupStatus"></div>
+    </div>
+    <div class="field">
+      <label>Notes</label>
+      <textarea id="fNotes" rows="2" placeholder="Shade, where bought, etc."></textarea>
+    </div>
+    <div class="btns">
+      <button class="btn ghost" id="cancelBtn">Cancel</button>
+      <button class="btn primary" id="saveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal" id="detail">
+  <div class="sheet" id="detailSheet"></div>
+</div>
+
+<!-- Settings / backup modal -->
+<div class="modal" id="menuModal">
+  <div class="sheet">
+    <h2>Backup &amp; data</h2>
+    <div class="hint" style="margin-bottom:14px">Your inventory is stored only on this device. Back it up regularly so you don't lose it.</div>
+    <div class="btns" style="flex-direction:column">
+      <button class="btn primary" id="expJson" style="margin-bottom:10px">⬇ Backup all (JSON, incl. photos)</button>
+      <button class="btn ghost" id="expCsv" style="margin-bottom:10px">⬇ Export list (CSV, no photos)</button>
+      <button class="btn ghost" id="impBtn" style="margin-bottom:10px">⬆ Restore from backup file</button>
+      <input type="file" id="impFile" accept="application/json,.json" style="display:none">
+    </div>
+    <div class="hint" id="menuStatus" style="margin-top:10px"></div>
+
+    <h2 style="margin-top:22px">🔔 Expiry reminders</h2>
+    <div class="hint" style="margin-bottom:10px">Get notified about items near expiry. Works while the app is open (a phone notification appears once a day).</div>
+    <div class="row2" style="align-items:flex-end">
+      <div class="field" style="margin-bottom:0">
+        <label>Warn me this far ahead</label>
+        <select id="remDays">
+          <option value="14">2 weeks</option>
+          <option value="30">1 month</option>
+          <option value="60">2 months</option>
+          <option value="90">3 months</option>
+          <option value="180">6 months</option>
+          <option value="210" selected>7 months</option>
+          <option value="365">12 months</option>
+        </select>
+      </div>
+      <button class="btn primary" id="remToggle" style="flex:none;padding:11px 14px;margin-bottom:0">Enable</button>
+    </div>
+    <div class="hint" id="remStatus" style="margin-top:8px"></div>
+
+    <h2 style="margin-top:22px">☁️ Cloud sync (optional)</h2>
+    <div class="hint" style="margin-bottom:10px">Sync your inventory to the cloud so it's safe if you lose your phone, and available on another device. Uses a free <b>jsonbin.io</b> account — sign up, copy your <b>Master Key</b>, paste it below. Leave Bin ID empty the first time and I'll create one.</div>
+    <div class="field"><label>JSONBin Master Key</label><input id="cloudKey" placeholder="$2a$10$…" autocomplete="off"></div>
+    <div class="field"><label>Bin ID (auto-filled after first upload)</label><input id="cloudBin" placeholder="created automatically" autocomplete="off"></div>
+    <div class="row2">
+      <button class="btn primary" id="cloudUp" style="margin-bottom:0">⬆ Sync up</button>
+      <button class="btn ghost" id="cloudDown" style="margin-bottom:0">⬇ Sync down</button>
+    </div>
+    <div class="hint" id="cloudStatus" style="margin-top:8px"></div>
+
+    <div class="btns" style="flex-direction:column;margin-top:20px">
+      <button class="btn ghost" id="menuClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scanner modal -->
+<div class="modal" id="scanModal">
+  <div class="sheet" style="text-align:center">
+    <h2>Scan barcode</h2>
+    <video id="scanVideo" playsinline style="width:100%;border-radius:12px;background:#000;aspect-ratio:3/4;object-fit:cover"></video>
+    <div class="hint" id="scanHint">Point the back camera at the barcode…</div>
+    <button class="btn ghost" id="scanCancel" style="margin-top:12px">Cancel</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+/* ---------- data model ---------- */
+const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
+const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
+  "Face Oil","Eye Cream","Mask / Sheet Mask","Exfoliant","Sunscreen","Spot Treatment"];
+const BRANDS_US = ["CeraVe","The Ordinary","Fenty Beauty","e.l.f.","Glossier","Estée Lauder","La Mer","Lancôme",
+  "Clinique","Rare Beauty","Drunk Elephant","Tatcha"];
+const BRANDS_JP = ["Shiseido","SK-II","Clé de Peau Beauté","Shiro","Hada Labo","Canmake","Kosé","DHC","Kanebo","Fancl","Cezanne","Biore"];
+
+/* ---------- tiny IndexedDB wrapper ---------- */
+let db;
+function openDB(){return new Promise((res,rej)=>{
+  const r=indexedDB.open("cosmeticInv",1);
+  r.onupgradeneeded=e=>{e.target.result.createObjectStore("items",{keyPath:"id"})};
+  r.onsuccess=e=>{db=e.target.result;res()};
+  r.onerror=e=>rej(e);
+});}
+function tx(mode){return db.transaction("items",mode).objectStore("items");}
+function putItem(it){return new Promise(r=>{tx("readwrite").put(it).onsuccess=()=>r();});}
+function delItem(id){return new Promise(r=>{tx("readwrite").delete(id).onsuccess=()=>r();});}
+function allItems(){return new Promise(r=>{tx("readonly").getAll().onsuccess=e=>r(e.target.result);});}
+
+/* ---------- expiry logic ---------- */
+function effectiveExpiry(it){
+  if(it.expiry) return it.expiry;
+  if(it.opened && it.pao){
+    const d=new Date(it.opened); d.setMonth(d.getMonth()+parseInt(it.pao));
+    return d.toISOString().slice(0,10);
+  }
+  return null;
+}
+function daysLeft(dateStr){
+  if(!dateStr) return null;
+  const ms=new Date(dateStr+"T00:00:00")-new Date(new Date().toDateString());
+  return Math.round(ms/86400000);
+}
+function flagFor(it){
+  if(it.status==="finished") return {c:"gray",label:"Finished"};
+  const exp=effectiveExpiry(it); const d=daysLeft(exp);
+  if(d===null) return {c:"gray",label:"No date"};
+  if(d<0) return {c:"red",label:"Expired "+Math.abs(d)+"d ago"};
+  if(d<=30) return {c:"amber",label:d+"d left"};
+  return {c:"green",label:d+"d left"};
+}
+function fmtDate(s){return s?new Date(s+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"—";}
+
+/* ---------- state ---------- */
+let ITEMS=[]; let editId=null;
+let photo1=null, photo2=null;
+
+/* ---------- rendering ---------- */
+function renderStats(){
+  let red=0,amber=0,ok=0;
+  ITEMS.forEach(it=>{if(it.status==="finished")return;const f=flagFor(it);
+    if(f.c==="red")red++;else if(f.c==="amber")amber++;else if(f.c==="green")ok++;});
+  document.getElementById("stats").innerHTML=`
+    <div class="stat"><div class="n">${ITEMS.filter(i=>i.status!=="finished").length}</div><div class="l">In inventory</div></div>
+    <div class="stat red"><div class="n">${red}</div><div class="l">Expired</div></div>
+    <div class="stat amber"><div class="n">${amber}</div><div class="l">Soon (30d)</div></div>
+    <div class="stat green"><div class="n">${ok}</div><div class="l">Good</div></div>`;
+}
+function renderList(){
+  const q=document.getElementById("search").value.toLowerCase();
+  const ft=document.getElementById("filter").value;
+  const sort=document.getElementById("sort").value;
+  let arr=ITEMS.filter(it=>{
+    const hay=((it.brand||"")+" "+(it.name||"")).toLowerCase();
+    if(q&&!hay.includes(q))return false;
+    if(ft&&it.type!==ft)return false;
+    return true;
+  });
+  arr.sort((a,b)=>{
+    if(sort==="name")return (a.name||"").localeCompare(b.name||"");
+    if(sort==="brand")return (a.brand||"").localeCompare(b.brand||"");
+    const ea=effectiveExpiry(a),eb=effectiveExpiry(b);
+    if(!ea)return 1; if(!eb)return -1; return ea.localeCompare(eb);
+  });
+  const list=document.getElementById("list");
+  if(!arr.length){list.innerHTML=`<div class="empty"><div class="big">🧴</div>
+    ${ITEMS.length?"No matches.":"No products yet.<br>Tap + to add your first one."}</div>`;return;}
+  list.innerHTML=arr.map(it=>{
+    const f=flagFor(it); const exp=effectiveExpiry(it);
+    const thumb=it.photo1?`<img class="thumb" src="${it.photo1}">`:`<div class="thumb ph">🧴</div>`;
+    return `<div class="item" data-id="${it.id}">
+      <div class="flag ${f.c}"></div>${thumb}
+      <div class="meta">
+        <div class="brand">${it.brand||"&nbsp;"}</div>
+        <div class="name">${it.name||"Untitled"}</div>
+        <div class="tags">${it.type?`<span class="tag">${it.type}</span>`:""}<span class="tag">${it.category}</span></div>
+        <div class="exp ${f.c}">${exp?"Exp "+fmtDate(exp)+" · ":""}${f.label}</div>
+      </div></div>`;
+  }).join("");
+  list.querySelectorAll(".item").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
+}
+function refresh(){renderStats();renderList();}
+
+/* ---------- detail view ---------- */
+function showDetail(id){
+  const it=ITEMS.find(x=>x.id===id); if(!it)return;
+  const f=flagFor(it); const exp=effectiveExpiry(it);
+  const row=(k,v)=>v?`<div class="detailrow"><span class="k">${k}</span><span>${v}</span></div>`:"";
+  document.getElementById("detailSheet").innerHTML=`
+    <h2>${it.name||"Untitled"}</h2>
+    ${it.photo1?`<img class="bigphoto" src="${it.photo1}">`:""}
+    ${it.photo2?`<img class="bigphoto" src="${it.photo2}">`:""}
+    ${row("Brand",it.brand)}
+    ${row("Category",it.category)}
+    ${row("Type",it.type)}
+    <div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>
+    ${row("Opened",it.opened?fmtDate(it.opened):"")}
+    ${row("PAO",it.pao?it.pao+" months":"")}
+    ${row("Status",it.status)}
+    ${row("Lot / batch",it.lot)}
+    ${row("Barcode",it.barcode)}
+    ${row("Quantity",it.qty)}
+    ${row("Notes",it.notes)}
+    <div class="btns" style="margin-top:16px">
+      <button class="btn ghost" id="dClose">Close</button>
+      <button class="btn primary" id="dEdit">Edit</button>
+      <button class="btn danger" id="dDel">🗑</button>
+    </div>`;
+  document.getElementById("detail").classList.add("open");
+  document.getElementById("dClose").onclick=()=>document.getElementById("detail").classList.remove("open");
+  document.getElementById("dEdit").onclick=()=>{document.getElementById("detail").classList.remove("open");openModal(it);};
+  document.getElementById("dDel").onclick=async()=>{
+    if(confirm("Delete this product?")){await delItem(id);ITEMS=await allItems();document.getElementById("detail").classList.remove("open");refresh();}
+  };
+}
+
+/* ---------- add/edit modal ---------- */
+function buildSelects(){
+  const cat=document.getElementById("fCat");
+  cat.innerHTML=CATEGORIES.map(c=>`<option>${c}</option>`).join("");
+  const type=document.getElementById("fType");
+  type.innerHTML=SKIN_TYPES.map(t=>`<option>${t}</option>`).join("");
+  const filter=document.getElementById("filter");
+  filter.innerHTML=`<option value="">All types</option>`+SKIN_TYPES.map(t=>`<option>${t}</option>`).join("");
+  renderBrandChips();
+  document.getElementById("brandManageBtn").onclick=()=>{
+    manageMode=!manageMode;
+    document.getElementById("brandManageBtn").textContent=manageMode?"Done":"Manage";
+    document.getElementById("brandManageHint").style.display=manageMode?"block":"none";
+    renderBrandChips();
+  };
+  cat.onchange=toggleTypeField;
+}
+
+/* ---- brand chips with hide/manage ---- */
+let HIDDEN_BRANDS=[]; let manageMode=false;
+try{HIDDEN_BRANDS=JSON.parse(localStorage.getItem("hiddenBrands")||"[]");}catch(_){}
+function saveHidden(){try{localStorage.setItem("hiddenBrands",JSON.stringify(HIDDEN_BRANDS));}catch(_){}}
+function renderBrandChips(){
+  const chips=document.getElementById("brandChips");
+  const cur=document.getElementById("fBrand").value;
+  const grp=(label,arr)=>{
+    const vis=arr.filter(b=>manageMode||!HIDDEN_BRANDS.includes(b));
+    if(!vis.length) return "";
+    return `<div style="width:100%;font-size:11px;color:var(--muted);margin:6px 0 2px">${label}</div>`+
+      vis.map(b=>{
+        const hid=HIDDEN_BRANDS.includes(b);
+        const mark=manageMode?(hid?"＋ ":"✕ "):"";
+        return `<span class="chip${cur===b?" on":""}${hid?" hidden-chip":""}" data-b="${b}">${mark}${b}</span>`;
+      }).join("");
+  };
+  chips.innerHTML=grp("🇺🇸 US / Western",BRANDS_US)+grp("🇯🇵 Japan",BRANDS_JP);
+  chips.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
+    const b=c.dataset.b;
+    if(manageMode){
+      if(HIDDEN_BRANDS.includes(b))HIDDEN_BRANDS=HIDDEN_BRANDS.filter(x=>x!==b);
+      else HIDDEN_BRANDS.push(b);
+      saveHidden(); renderBrandChips();
+    }else{
+      document.getElementById("fBrand").value=b;
+      chips.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
+      c.classList.add("on");
+    }
+  });
+}
+function toggleTypeField(){
+  document.getElementById("typeField").style.display=
+    document.getElementById("fCat").value==="Skincare"?"block":"none";
+}
+function openModal(it){
+  editId=it?it.id:null;
+  document.getElementById("sheetTitle").textContent=it?"Edit product":"Add product";
+  const g=id=>document.getElementById(id);
+  g("fBrand").value=it?.brand||""; g("fName").value=it?.name||"";
+  g("fCat").value=it?.category||"Skincare"; g("fType").value=it?.type||"Serum";
+  g("fExpiry").value=it?.expiry||""; g("fStatus").value=it?.status||"sealed";
+  g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
+  g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
+  g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
+  photo1=it?.photo1||null; photo2=it?.photo2||null;
+  setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎");
+  document.getElementById("brandChips").querySelectorAll(".chip").forEach(c=>
+    c.classList.toggle("on",c.dataset.b===(it?.brand)));
+  toggleTypeField();
+  document.getElementById("modal").classList.add("open");
+}
+function setPhotoBtn(id,data,ic){
+  const b=document.getElementById(id);
+  b.innerHTML=data?`<img src="${data}">`:`<span class="ic">${ic}</span><span class="t">Take photo</span>`;
+}
+function closeModal(){document.getElementById("modal").classList.remove("open");}
+
+/* image resize to keep storage small */
+function readImage(file,cb){
+  const r=new FileReader();
+  r.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const max=900,sc=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement("canvas");
+      c.width=img.width*sc;c.height=img.height*sc;
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      cb(c.toDataURL("image/jpeg",0.8));
+    };img.src=e.target.result;
+  };r.readAsDataURL(file);
+}
+
+async function save(){
+  const g=id=>document.getElementById(id).value.trim();
+  const name=g("fName");
+  if(!name){alert("Please enter a product name.");return;}
+  const cat=document.getElementById("fCat").value;
+  const it={
+    id:editId||("it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)),
+    brand:g("fBrand"), name, category:cat,
+    type:cat==="Skincare"?document.getElementById("fType").value:"",
+    expiry:document.getElementById("fExpiry").value,
+    status:document.getElementById("fStatus").value,
+    opened:document.getElementById("fOpened").value,
+    pao:document.getElementById("fPao").value,
+    lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
+    photo1, photo2, created:editId?undefined:Date.now()
+  };
+  await putItem(it); ITEMS=await allItems(); closeModal(); refresh();
+}
+
+/* ---------- wire up ---------- */
+document.getElementById("addBtn").onclick=()=>openModal(null);
+document.getElementById("cancelBtn").onclick=closeModal;
+document.getElementById("saveBtn").onclick=save;
+document.getElementById("search").oninput=renderList;
+document.getElementById("filter").onchange=renderList;
+document.getElementById("sort").onchange=renderList;
+document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
+document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
+document.getElementById("p1").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo1=d;setPhotoBtn("p1btn",d);});};
+document.getElementById("p2").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo2=d;setPhotoBtn("p2btn",d);});};
+[document.getElementById("modal"),document.getElementById("detail")].forEach(m=>
+  m.onclick=e=>{if(e.target===m)m.classList.remove("open");});
+
+(async function init(){
+  await openDB(); buildSelects(); ITEMS=await allItems(); refresh();
+})();
+
+/* ================= PHASE 2: barcode scan + lookup + OCR ================= */
+
+/* ---- live barcode scanning (ZXing) ---- */
+let codeReader=null;
+async function startScan(){
+  if(!window.ZXing){alert("Scanner needs internet to load. Connect and reopen.");return;}
+  document.getElementById("scanModal").classList.add("open");
+  document.getElementById("scanHint").textContent="Starting camera…";
+  try{
+    codeReader=new ZXing.BrowserMultiFormatReader();
+    let deviceId;
+    try{
+      const devices=await codeReader.listVideoInputDevices();
+      const back=devices.find(d=>/back|rear|environment/i.test(d.label));
+      deviceId=(back||devices[devices.length-1]||{}).deviceId;
+    }catch(_){}
+    document.getElementById("scanHint").textContent="Point the back camera at the barcode…";
+    codeReader.decodeFromVideoDevice(deviceId,"scanVideo",(result,err)=>{
+      if(result){const code=result.getText(); stopScan(); onBarcode(code);}
+    });
+  }catch(e){document.getElementById("scanHint").textContent="Camera error: "+e.message;}
+}
+function stopScan(){
+  try{if(codeReader)codeReader.reset();}catch(_){}
+  codeReader=null;
+  document.getElementById("scanModal").classList.remove("open");
+}
+function onBarcode(code){
+  document.getElementById("fBarcode").value=code;
+  lookupBarcode(code);
+}
+
+/* ---- auto-lookup via Open Beauty Facts ---- */
+async function lookupBarcode(code){
+  const s=document.getElementById("lookupStatus");
+  s.textContent="🔎 Looking up "+code+"…";
+  try{
+    const r=await fetch("https://world.openbeautyfacts.org/api/v2/product/"+encodeURIComponent(code)+".json");
+    const j=await r.json();
+    if(j&&j.status===1&&j.product){
+      const p=j.product;
+      const brand=(p.brands||"").split(",")[0].trim();
+      const name=p.product_name||p.generic_name||"";
+      if(brand&&!document.getElementById("fBrand").value)document.getElementById("fBrand").value=brand;
+      if(name&&!document.getElementById("fName").value)document.getElementById("fName").value=name;
+      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify &amp; edit.";
+    }else{
+      s.textContent="No database match (common for cosmetics) — enter details manually. Barcode saved.";
+    }
+  }catch(e){
+    s.textContent="Lookup unavailable (offline?). Barcode saved.";
+  }
+}
+
+/* ---- OCR the lot/date photo (Tesseract) ---- */
+async function readPhoto2(){
+  if(!photo2){alert("Take the 2nd photo (lot / date) first.");return;}
+  if(!window.Tesseract){alert("OCR needs internet to load. Connect and reopen.");return;}
+  const s=document.getElementById("ocrStatus");
+  s.textContent="Reading text… first run downloads the engine (~few MB).";
+  try{
+    const {data}=await Tesseract.recognize(photo2,"eng");
+    const text=(data&&data.text)||"";
+    const lot=parseLot(text), date=parseDate(text);
+    if(lot)document.getElementById("fLot").value=lot;
+    if(date)document.getElementById("fExpiry").value=date;
+    if(lot||date){
+      s.innerHTML="Read "+(lot?"lot <b>"+lot+"</b>":"")+(lot&&date?" · ":"")+(date?"expiry <b>"+fmtDate(date)+"</b>":"")+" — please verify.";
+    }else{
+      s.textContent="Couldn't detect a lot/date. Enter manually, or retake a clearer, closer photo.";
+    }
+  }catch(e){s.textContent="OCR failed: "+(e.message||e);}
+}
+
+/* ---- text parsers ---- */
+function parseDate(raw){
+  const t=raw.toUpperCase().replace(/[^\dA-Z\/\.\-: ]/g," ");
+  const near=(m)=>{ // prefer dates following EXP/BEST BEFORE/USE BY
+    const idx=t.search(/EXP|BEST|USE BY|BB|BBE/);
+    return idx>=0 ? Math.abs(m.index-idx) : 999;
+  };
+  const cands=[];
+  let m;
+  // yyyy mm dd
+  const re1=/\b(20\d{2})[.\-\/ ]?(\d{1,2})[.\-\/ ]?(\d{1,2})\b/g;
+  while((m=re1.exec(t))){cands.push({d:iso(m[1],m[2],m[3]),score:near(m)});}
+  // dd mm yyyy  (assume day/month/year)
+  const re2=/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](20\d{2})\b/g;
+  while((m=re2.exec(t))){cands.push({d:iso(m[3],m[2],m[1]),score:near(m)});}
+  // mm yyyy -> end of month
+  const re3=/\b(\d{1,2})[.\-\/](20\d{2})\b/g;
+  while((m=re3.exec(t))){cands.push({d:eom(m[2],m[1]),score:near(m)+1});}
+  const valid=cands.filter(c=>c.d).sort((a,b)=>a.score-b.score);
+  return valid.length?valid[0].d:null;
+}
+function iso(y,mo,d){
+  y=+y;mo=+mo;d=+d;
+  if(mo<1||mo>12||d<1||d>31)return null;
+  return y+"-"+String(mo).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+}
+function eom(y,mo){
+  y=+y;mo=+mo; if(mo<1||mo>12)return null;
+  const last=new Date(y,mo,0).getDate();
+  return y+"-"+String(mo).padStart(2,"0")+"-"+String(last).padStart(2,"0");
+}
+function parseLot(raw){
+  const t=raw.toUpperCase();
+  let m=t.match(/LOT[:\s#]*([A-Z0-9][A-Z0-9\-]{2,})/);
+  if(m)return m[1];
+  // else a token mixing letters+digits, length>=4 (typical batch code)
+  const toks=raw.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  const cand=toks.find(x=>x.length>=4&&x.length<=14&&/[A-Z]/.test(x)&&/\d/.test(x));
+  return cand||null;
+}
+
+/* ---- wire Phase-2 buttons ---- */
+document.getElementById("scanBtn").onclick=startScan;
+document.getElementById("scanCancel").onclick=stopScan;
+document.getElementById("scanModal").addEventListener("click",e=>{if(e.target.id==="scanModal")stopScan();});
+document.getElementById("ocrBtn").onclick=readPhoto2;
+
+/* ================= PHASE 3: backup / export / restore ================= */
+function downloadFile(name,mime,content){
+  const blob=new Blob([content],{type:mime});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();
+  a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
+}
+function stamp(){return new Date().toISOString().slice(0,10);}
+function exportJson(){
+  const payload={app:"cosmetic-inventory",version:1,exported:new Date().toISOString(),items:ITEMS};
+  downloadFile("cosmetic-inventory-backup-"+stamp()+".json","application/json",JSON.stringify(payload));
+  document.getElementById("menuStatus").textContent="✓ Backup downloaded ("+ITEMS.length+" items).";
+}
+function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
+function exportCsv(){
+  const cols=["brand","name","category","type","expiry","opened","pao","status","lot","barcode","qty","notes"];
+  const head=["Brand","Name","Category","Type","Expiry","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
+  const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it))).join(","));
+  downloadFile("cosmetic-inventory-"+stamp()+".csv","text/csv",head.map(csvCell).join(",")+"\n"+rows.join("\n"));
+  document.getElementById("menuStatus").textContent="✓ CSV downloaded ("+ITEMS.length+" items).";
+}
+async function importJson(file){
+  const s=document.getElementById("menuStatus");
+  try{
+    const text=await file.text();
+    const data=JSON.parse(text);
+    const items=Array.isArray(data)?data:data.items;
+    if(!Array.isArray(items))throw new Error("Not a valid backup file.");
+    const mode=confirm("OK = MERGE with current data.\nCancel = REPLACE everything with the backup.");
+    if(!mode){ // replace
+      const cur=await allItems();
+      await Promise.all(cur.map(i=>delItem(i.id)));
+    }
+    let n=0;
+    for(const it of items){ if(it&&it.id){await putItem(it);n++;} }
+    ITEMS=await allItems(); refresh();
+    s.textContent="✓ Restored "+n+" items ("+(mode?"merged":"replaced")+").";
+  }catch(e){s.textContent="Restore failed: "+(e.message||e);}
+}
+document.getElementById("menuBtn").onclick=()=>{document.getElementById("menuStatus").textContent="";document.getElementById("menuModal").classList.add("open");};
+document.getElementById("menuClose").onclick=()=>document.getElementById("menuModal").classList.remove("open");
+document.getElementById("menuModal").addEventListener("click",e=>{if(e.target.id==="menuModal")e.currentTarget.classList.remove("open");});
+document.getElementById("expJson").onclick=exportJson;
+document.getElementById("expCsv").onclick=exportCsv;
+document.getElementById("impBtn").onclick=()=>document.getElementById("impFile").click();
+document.getElementById("impFile").onchange=e=>{if(e.target.files[0])importJson(e.target.files[0]);e.target.value="";};
+
+/* ================= PHASE 4: reminders + cloud sync ================= */
+
+/* ---- expiry reminders (Notification API) ---- */
+let REM={on:false,days:210};
+try{REM=Object.assign(REM,JSON.parse(localStorage.getItem("reminders")||"{}"));}catch(_){}
+function saveRem(){try{localStorage.setItem("reminders",JSON.stringify(REM));}catch(_){}}
+function aheadLabel(d){
+  if(d%30===0)return (d/30)+(d/30===1?" month":" months");
+  if(d===14)return "2 weeks";
+  if(d===7)return "1 week";
+  return d+" days";
+}
+function updateRemUI(){
+  document.getElementById("remDays").value=REM.days;
+  const on=REM.on && ("Notification"in window) && Notification.permission==="granted";
+  document.getElementById("remToggle").textContent=on?"On ✓":"Enable";
+  document.getElementById("remStatus").textContent=on
+    ?("Reminders on — warning "+aheadLabel(REM.days)+" ahead.")
+    :(("Notification"in window)?"Reminders off.":"This browser can't show notifications.");
+}
+async function toggleReminders(){
+  if(!("Notification"in window)){alert("Notifications aren't supported here.");return;}
+  if(REM.on && Notification.permission==="granted"){REM.on=false;saveRem();updateRemUI();return;}
+  let p=Notification.permission;
+  if(p!=="granted")p=await Notification.requestPermission();
+  if(p==="granted"){REM.on=true;saveRem();updateRemUI();checkReminders(true);}
+  else{document.getElementById("remStatus").textContent="Permission denied — enable notifications for this site in your browser settings.";}
+}
+function checkReminders(force){
+  if(!REM.on||!("Notification"in window)||Notification.permission!=="granted")return;
+  const today=new Date().toDateString();
+  if(!force&&localStorage.getItem("remLast")===today)return;
+  const soon=ITEMS.filter(it=>it.status!=="finished")
+    .map(it=>({it,d:daysLeft(effectiveExpiry(it))}))
+    .filter(x=>x.d!==null&&x.d<=REM.days);
+  if(soon.length){
+    const expired=soon.filter(x=>x.d<0).length, near=soon.length-expired;
+    const parts=[]; if(expired)parts.push(expired+" expired"); if(near)parts.push(near+" expiring soon");
+    try{new Notification("💄 Cosmetic Inventory",{body:parts.join(" · ")+" (within "+aheadLabel(REM.days)+"). Open to review."});}catch(_){}
+    localStorage.setItem("remLast",today);
+  }
+}
+document.getElementById("remDays").onchange=e=>{REM.days=parseInt(e.target.value);saveRem();updateRemUI();};
+document.getElementById("remToggle").onclick=toggleReminders;
+
+/* ---- cloud sync via JSONBin ---- */
+const CLOUD={key:localStorage.getItem("cloudKey")||"",bin:localStorage.getItem("cloudBin")||""};
+function loadCloudUI(){document.getElementById("cloudKey").value=CLOUD.key;document.getElementById("cloudBin").value=CLOUD.bin;}
+function readCloudInputs(){
+  CLOUD.key=document.getElementById("cloudKey").value.trim();
+  CLOUD.bin=document.getElementById("cloudBin").value.trim();
+  localStorage.setItem("cloudKey",CLOUD.key);localStorage.setItem("cloudBin",CLOUD.bin);
+}
+async function cloudUp(){
+  readCloudInputs();
+  const s=document.getElementById("cloudStatus");
+  if(!CLOUD.key){s.textContent="Paste your JSONBin Master Key first.";return;}
+  const payload={app:"cosmetic-inventory",updated:new Date().toISOString(),items:ITEMS};
+  s.textContent="Uploading "+ITEMS.length+" items…";
+  try{
+    let url,method;
+    if(CLOUD.bin){url="https://api.jsonbin.io/v3/b/"+CLOUD.bin;method="PUT";}
+    else{url="https://api.jsonbin.io/v3/b";method="POST";}
+    const r=await fetch(url,{method,headers:{"Content-Type":"application/json","X-Master-Key":CLOUD.key,"X-Bin-Private":"true","X-Bin-Name":"cosmetic-inventory"},body:JSON.stringify(payload)});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.message||("HTTP "+r.status));
+    if(!CLOUD.bin){CLOUD.bin=(j.metadata&&j.metadata.id)||"";document.getElementById("cloudBin").value=CLOUD.bin;localStorage.setItem("cloudBin",CLOUD.bin);}
+    s.innerHTML="✓ Synced up ("+ITEMS.length+" items). Bin saved — use the same key + Bin ID on another device to sync down.";
+  }catch(e){s.textContent="Sync up failed: "+(e.message||e);}
+}
+async function cloudDown(){
+  readCloudInputs();
+  const s=document.getElementById("cloudStatus");
+  if(!CLOUD.key||!CLOUD.bin){s.textContent="Need both Master Key and Bin ID to sync down.";return;}
+  if(!confirm("This replaces your current data with the cloud copy. Continue?"))return;
+  s.textContent="Downloading…";
+  try{
+    const r=await fetch("https://api.jsonbin.io/v3/b/"+CLOUD.bin+"/latest",{headers:{"X-Master-Key":CLOUD.key}});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.message||("HTTP "+r.status));
+    const items=(j.record&&j.record.items)||[];
+    const cur=await allItems(); await Promise.all(cur.map(i=>delItem(i.id)));
+    for(const it of items){if(it&&it.id)await putItem(it);}
+    ITEMS=await allItems(); refresh();
+    s.textContent="✓ Synced down — "+items.length+" items loaded.";
+  }catch(e){s.textContent="Sync down failed: "+(e.message||e);}
+}
+document.getElementById("cloudUp").onclick=cloudUp;
+document.getElementById("cloudDown").onclick=cloudDown;
+
+/* hook settings-open to refresh these panels + run reminder check on load */
+const _menuBtn=document.getElementById("menuBtn");
+const _origMenu=_menuBtn.onclick;
+_menuBtn.onclick=()=>{_origMenu();updateRemUI();loadCloudUI();};
+window.addEventListener("load",()=>{setTimeout(()=>checkReminders(false),1500);});
+</script>
+</body>
+</html>
