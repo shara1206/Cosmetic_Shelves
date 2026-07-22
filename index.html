@@ -263,16 +263,20 @@
 
     <!-- 4 · MORE DETAILS -->
     <details class="more" id="moreDetails" style="margin-top:12px">
-      <summary>More details (lot, quantity, notes)</summary>
+      <summary>More details (purchase date, lot, quantity, notes)</summary>
       <div class="row2">
         <div class="field">
-          <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a></label>
-          <input id="fLot" placeholder="type it, or read from photo">
+          <label>Purchase date</label>
+          <input type="date" id="fPurchase">
         </div>
         <div class="field">
           <label>Quantity</label>
           <input type="number" id="fQty" value="1" min="1">
         </div>
+      </div>
+      <div class="field">
+        <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a></label>
+        <input id="fLot" placeholder="type it, or read from photo">
       </div>
       <div class="hint" style="margin:-2px 0 8px">A batch code isn't a date — it encodes the make date. Tap “Decode date”, then set Manufacture date + Shelf life above.</div>
       <div class="field">
@@ -496,6 +500,7 @@ function showDetail(id){
     ${row("Category",it.category)}
     ${row("Type",it.type)}
     <div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>
+    ${row("Purchased",it.purchase?fmtDate(it.purchase):"")}
     ${row("Opened",it.opened?fmtDate(it.opened):"")}
     ${row("PAO",it.pao?it.pao+" months":"")}
     ${row("Manufactured",it.mfg?fmtDate(it.mfg):"")}
@@ -607,6 +612,7 @@ function openModal(it){
   g("fExpiry").value=(it?.expiry||"").slice(0,7); g("fStatus").value=it?.status||"sealed";
   g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
   g("fMfg").value=(it?.mfg||"").slice(0,7); g("fShelf").value=it?.shelf||"";
+  g("fPurchase").value=it?.purchase||"";
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
   g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
   photo1=it?.photo1||null; photo2=it?.photo2||null;
@@ -615,7 +621,7 @@ function openModal(it){
     c.classList.toggle("on",c.dataset.b===(it?.brand)));
   toggleTypeField();
   document.getElementById("moreDates").open=!!(it&&(it.opened||it.pao||it.mfg||it.shelf));
-  document.getElementById("moreDetails").open=!!(it&&(it.lot||it.notes||(it.qty&&String(it.qty)!=="1")));
+  document.getElementById("moreDetails").open=!!(it&&(it.purchase||it.lot||it.notes||(it.qty&&String(it.qty)!=="1")));
   document.getElementById("modal").querySelector(".sheet").scrollTop=0;
   document.getElementById("modal").classList.add("open");
 }
@@ -653,6 +659,7 @@ async function save(){
     status:document.getElementById("fStatus").value,
     opened:document.getElementById("fOpened").value,
     pao:document.getElementById("fPao").value,
+    purchase:document.getElementById("fPurchase").value,
     mfg:document.getElementById("fMfg").value,
     shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
@@ -856,7 +863,7 @@ async function readProductPhoto(auto,tries){
   s.textContent="Reading the label…";
   try{
     const img=await preprocessForOCR(photo1);
-    const {data}=await Tesseract.recognize(img,"eng");
+    const {data}=await Tesseract.recognize(img,"eng+jpn");
     const text=(data&&data.text)||"";
     // Try Chrome's built-in Gemini first (cleans messy OCR into brand + name), with a timeout so it never blocks
     const g=await Promise.race([geminiExtractProduct(text), new Promise(r=>setTimeout(()=>r(null),8000))]);
@@ -925,8 +932,9 @@ function parseFlexible(s){ // -> {y,m,d?} or null
 function parseAnyMonth(s){const p=parseFlexible(s); return (p&&p.m)?p.y+"-"+String(p.m).padStart(2,"0"):"";}
 function parseAnyFull(s){const p=parseFlexible(s); return (p&&p.m)?p.y+"-"+String(p.m).padStart(2,"0")+"-"+String(p.d||1).padStart(2,"0"):"";}
 function importParse(text){
-  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length);
-  const stop=/^(brand|type|price|period|purchase|start|expiration|expiry|tags|more details|product name)/i;
+  const UI=/^(collection|routines|project pan|statistics|more$|less details|more details|mark as used|not used yet|upgrade|you.?ve reached|search|edit a product|skincare:|makeup:|hair ?care|\d{1,2}:\d{2}$|★|☆|[*]{3,})/i;
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length && !UI.test(l));
+  const stop=/^(brand|type|price|period|purchase|start|expiration|expiry|tags|product name)/i;
   const findIdx=re=>lines.findIndex(l=>re.test(l));
   const after=re=>{const i=findIdx(re); if(i<0)return ""; const same=lines[i].replace(re,"").replace(/[:*]/g,"").trim(); if(same&&!stop.test(same))return same; const nx=lines[i+1]||""; return stop.test(nx)?"":nx;};
   const near=re=>{const i=findIdx(re); if(i<0)return ""; return lines[i]+" "+(lines[i+1]||"");};
@@ -934,12 +942,21 @@ function importParse(text){
   o.name=after(/product\s*name/i);
   o.brand=after(/^brand\b/i);
   o.type=after(/^type\b/i);
-  o.expiry=parseAnyMonth(near(/expiration|expiry|\bexp\b|best before/i));
-  o.opened=parseAnyFull(near(/start of use|opened/i));
+  // subtitle style "Brand · Type" (middot ·•・‧ or | )
+  const sub=lines.find(l=>/[·•・‧|]/.test(l) && l.length<40);
+  if(sub){
+    const parts=sub.split(/[·•・‧|]/).map(x=>x.trim()).filter(Boolean);
+    if(parts.length>=2){ if(!o.brand)o.brand=parts[0]; if(!o.type)o.type=parts[1]; }
+    if(!o.name){const si=lines.indexOf(sub); if(si>0)o.name=lines[si-1];}
+  }
+  // fallback: first substantial non-label line becomes the name
+  if(!o.name){ o.name=(lines.find(l=>l.length>=3 && !stop.test(l) && !/^\d/.test(l))||"").trim(); }
+  o.expiry=parseAnyMonth(near(/expiration|expiry|\bexp\b|best before|use by/i));
+  o.opened=parseAnyFull(near(/start of use|opened|first used/i));
   o.pao=(after(/period after opening/i).match(/\d+/)||[])[0]||"";
+  o.purchase=parseAnyFull(near(/purchase date|bought|purchased/i));
   const notes=[];
   const price=after(/^price/i); if(price)notes.push("Price: "+price);
-  const pd=parseAnyFull(near(/purchase date/i)); if(pd)notes.push("Purchased: "+pd);
   const tags=after(/tags/i); if(tags&&!/separated with comma/i.test(tags))notes.push(tags);
   o.notes=notes.join(" · ");
   return o;
@@ -949,7 +966,7 @@ async function geminiExtractFields(text){
   let session; try{session=await LM.create();}catch(_){return null;}
   try{
     const prompt="This is OCR text from a cosmetics app's product screen. Return ONLY compact JSON with keys "+
-      "brand,name,type,expiry,opened,pao,notes. Dates as YYYY-MM (expiry) or YYYY-MM-DD (opened). "+
+      "brand,name,type,expiry,opened,purchase,pao,notes. Dates as YYYY-MM (expiry) or YYYY-MM-DD (opened, purchase). "+
       "type must be one of: "+SKIN_TYPES.join(", ")+". Unknown fields = empty string. Text:\n"+(text||"").slice(0,900);
     const out=await session.prompt(prompt);
     try{session.destroy&&session.destroy();}catch(_){}
@@ -966,6 +983,7 @@ function applyImport(o){
   if(ty){document.getElementById("fCat").value="Skincare"; toggleTypeField(); document.getElementById("fType").value=ty; typeTouched=true; filled.push("type");}
   const exp=(o.expiry||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(exp)){document.getElementById("fExpiry").value=exp; filled.push("expiry");}
   let op=o.opened||""; if(/^\d{4}-\d{2}$/.test(op))op+="-01"; if(/^\d{4}-\d{2}-\d{2}$/.test(op)){document.getElementById("fOpened").value=op; document.getElementById("moreDates").open=true; filled.push("opened");}
+  let pu=o.purchase||""; if(/^\d{4}-\d{2}$/.test(pu))pu+="-01"; if(/^\d{4}-\d{2}-\d{2}$/.test(pu)){document.getElementById("fPurchase").value=pu; document.getElementById("moreDetails").open=true; filled.push("purchase date");}
   const pao=(String(o.pao||"").match(/\d+/)||[])[0];
   if(pao&&["3","6","9","12","18","24","36"].includes(pao)){document.getElementById("fPao").value=pao; document.getElementById("moreDates").open=true; filled.push("PAO");}
   if(o.notes){const n=document.getElementById("fNotes"); n.value=(n.value?n.value+" · ":"")+o.notes; document.getElementById("moreDetails").open=true;}
@@ -976,7 +994,7 @@ async function geminiExtractMany(text){
   let session; try{session=await LM.create();}catch(_){return null;}
   try{
     const prompt="OCR text from a cosmetics app that may list ONE OR MORE products. Return ONLY a JSON array; "+
-      "each element has keys brand,name,type,expiry,opened,pao,notes. expiry as YYYY-MM, opened as YYYY-MM-DD. "+
+      "each element has keys brand,name,type,expiry,opened,purchase,pao,notes. expiry as YYYY-MM, opened and purchase as YYYY-MM-DD. "+
       "type must be one of: "+SKIN_TYPES.join(", ")+". Empty string if unknown. Text:\n"+(text||"").slice(0,1400);
     const out=await session.prompt(prompt);
     try{session.destroy&&session.destroy();}catch(_){}
@@ -993,7 +1011,7 @@ function splitRecords(text){
 }
 function readImageP(file){return new Promise(res=>readImage(file,res));}
 async function extractFromImage(dataURL){
-  const {data}=await Tesseract.recognize(await preprocessForOCR(dataURL),"eng");
+  const {data}=await Tesseract.recognize(await preprocessForOCR(dataURL),"eng+jpn");
   const text=(data&&data.text)||"";
   let arr=await Promise.race([geminiExtractMany(text), new Promise(r=>setTimeout(()=>r(null),10000))]);
   if(Array.isArray(arr)&&arr.length) return arr;
@@ -1008,6 +1026,7 @@ async function saveImported(r){
     expiry:/^\d{4}-\d{2}$/.test(exp)?exp:"", status:"sealed",
     opened:/^\d{4}-\d{2}-\d{2}$/.test(r.opened||"")?r.opened:"",
     pao:(String(r.pao||"").match(/\d+/)||[])[0]||"", mfg:"", shelf:"",
+    purchase:/^\d{4}-\d{2}-\d{2}$/.test(r.purchase||"")?r.purchase:"",
     lot:"", qty:1, barcode:"", notes:r.notes||"", photo1:null, photo2:null, created:Date.now()
   };
   await putItem(it);
@@ -1158,8 +1177,8 @@ function exportJson(){
 }
 function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
 function exportCsv(){
-  const cols=["brand","name","category","type","expiry","opened","pao","status","lot","barcode","qty","notes"];
-  const head=["Brand","Name","Category","Type","Expiry","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
+  const cols=["brand","name","category","type","expiry","purchase","opened","pao","status","lot","barcode","qty","notes"];
+  const head=["Brand","Name","Category","Type","Expiry","Purchased","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
   const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it))).join(","));
   downloadFile("cosmetic-inventory-"+stamp()+".csv","text/csv",head.map(csvCell).join(",")+"\n"+rows.join("\n"));
   document.getElementById("menuStatus").textContent="✓ CSV downloaded ("+ITEMS.length+" items).";
