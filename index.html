@@ -94,6 +94,7 @@
   .photobtn img{width:100%;height:100%;object-fit:cover}
   .photobtn .ic{font-size:26px} .photobtn .t{font-size:11px;margin-top:4px}
   .photobox input{display:none}
+  .albumbtn{width:100%;margin-top:6px;padding:7px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--pink-dark);font-size:12px;font-weight:600;cursor:pointer}
   /* brand picker chips */
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   .chip{font-size:12px;padding:5px 10px;border-radius:20px;background:#fff;border:1px solid var(--line);cursor:pointer}
@@ -150,6 +151,11 @@
   <div class="sheet">
     <h2 id="sheetTitle">Add product</h2>
 
+    <!-- Import from a screenshot of another app -->
+    <button type="button" class="btn ghost" id="importBtn" style="width:100%;margin:0 0 12px;font-size:13px;padding:10px">📥 Import from screenshot(s) — one or many products</button>
+    <input type="file" id="importFile" accept="image/*" multiple style="display:none">
+    <div class="hint" id="importStatus" style="display:none;margin:-8px 0 12px"></div>
+
     <!-- 0 · SCAN FIRST (autofills name/brand) -->
     <div style="background:#fbeef2;border:1px solid #f0d7e0;border-radius:12px;padding:10px;margin-bottom:14px">
       <label style="display:block;font-size:12px;color:var(--pink-dark);font-weight:700;margin-bottom:6px">📷 Scan barcode to autofill</label>
@@ -165,12 +171,16 @@
       <div class="photobox">
         <label>Product photo</label>
         <button class="photobtn" id="p1btn"><span class="ic">📷</span><span class="t">Take photo</span></button>
+        <button type="button" class="albumbtn" id="p1albumBtn">🖼 Choose from album</button>
         <input type="file" id="p1" accept="image/*" capture="environment">
+        <input type="file" id="p1album" accept="image/*">
       </div>
       <div class="photobox">
         <label>Lot / date photo</label>
         <button class="photobtn" id="p2btn"><span class="ic">🔎</span><span class="t">Take photo</span></button>
+        <button type="button" class="albumbtn" id="p2albumBtn">🖼 Choose from album</button>
         <input type="file" id="p2" accept="image/*" capture="environment">
+        <input type="file" id="p2album" accept="image/*">
       </div>
     </div>
     <div class="hint" id="nameOcrStatus" style="margin-bottom:4px"></div>
@@ -257,7 +267,7 @@
       <div class="row2">
         <div class="field">
           <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a></label>
-          <input id="fLot" placeholder="from photo">
+          <input id="fLot" placeholder="type it, or read from photo">
         </div>
         <div class="field">
           <label>Quantity</label>
@@ -403,6 +413,7 @@ function fmtDate(s){
 let ITEMS=[]; let editId=null;
 let photo1=null, photo2=null;
 let viewMode=localStorage.getItem("viewMode")||"list";
+let typeTouched=false;
 const FLAGCOLOR={red:"#e05656",amber:"#e0a13a",green:"#3fa66a",gray:"#c9bcc4"};
 
 /* ---------- rendering ---------- */
@@ -522,7 +533,8 @@ function buildSelects(){
     document.getElementById("brandManageHint").style.display=manageMode?"block":"none";
     renderBrandChips();
   };
-  cat.onchange=toggleTypeField;
+  cat.onchange=()=>{typeTouched=true;toggleTypeField();};
+  type.onchange=()=>{typeTouched=true;};
 }
 
 /* ---- brand chips with hide/manage ---- */
@@ -587,6 +599,7 @@ function toggleTypeField(){
 }
 function openModal(it){
   editId=it?it.id:null;
+  typeTouched=!!it; // when editing an existing item, keep its saved type
   document.getElementById("sheetTitle").textContent=it?"Edit product":"Add product";
   const g=id=>document.getElementById(id);
   g("fBrand").value=it?.brand||""; g("fName").value=it?.name||"";
@@ -658,11 +671,20 @@ document.getElementById("sort").onchange=renderList;
 function updateViewToggle(){document.getElementById("viewToggle").textContent=viewMode==="gallery"?"☰ List":"▦ Gallery";}
 document.getElementById("viewToggle").onclick=()=>{viewMode=viewMode==="gallery"?"list":"gallery";localStorage.setItem("viewMode",viewMode);updateViewToggle();renderList();};
 updateViewToggle();
+function handleP1(file){ if(file)readImage(file,d=>{photo1=d;setPhotoBtn("p1btn",d);if(!document.getElementById("fName").value)readProductPhoto(true);}); }
+function handleP2(file){ if(file)readImage(file,d=>{photo2=d;setPhotoBtn("p2btn",d);readPhoto2();}); }
 document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
 document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
-document.getElementById("p1").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo1=d;setPhotoBtn("p1btn",d);if(!document.getElementById("fName").value)readProductPhoto(true);});};
+document.getElementById("p1albumBtn").onclick=()=>document.getElementById("p1album").click();
+document.getElementById("p2albumBtn").onclick=()=>document.getElementById("p2album").click();
+document.getElementById("p1").onchange=e=>{handleP1(e.target.files[0]);e.target.value="";};
+document.getElementById("p1album").onchange=e=>{handleP1(e.target.files[0]);e.target.value="";};
+document.getElementById("p2").onchange=e=>{handleP2(e.target.files[0]);e.target.value="";};
+document.getElementById("p2album").onchange=e=>{handleP2(e.target.files[0]);e.target.value="";};
 document.getElementById("ocrNameBtn").onclick=()=>readProductPhoto(false);
-document.getElementById("p2").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo2=d;setPhotoBtn("p2btn",d);readPhoto2();});};
+document.getElementById("fName").oninput=()=>applyTypeGuess();
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=e=>{importScreenshots(e.target.files);e.target.value="";};
 [document.getElementById("modal"),document.getElementById("detail")].forEach(m=>
   m.onclick=e=>{if(e.target===m)m.classList.remove("open");});
 
@@ -703,7 +725,33 @@ function onBarcode(code){
 }
 
 /* ---- auto-lookup: your history → Open Beauty Facts → UPCitemdb ---- */
-function setIfEmpty(id,val){const el=document.getElementById(id);if(val&&!el.value)el.value=val;}
+function setIfEmpty(id,val){const el=document.getElementById(id);if(val&&!el.value){el.value=val; if(id==="fName")applyTypeGuess();}}
+/* guess the skincare type from the product name (user can still override) */
+function guessType(name){
+  const t=(name||"").toLowerCase(); if(!t)return null;
+  const rules=[
+    [/eye\s*(cream|gel|serum|balm)|\beye\b/, "Eye Cream"],
+    [/sun\s*(screen|block)|\bspf\b|\buv\b|sunscreen/, "Sunscreen"],
+    [/(sheet\s*)?mask|sheet\b|\bpack\b/, "Mask / Sheet Mask"],
+    [/exfoliat|peel(ing)?|scrub|\baha\b|\bbha\b/, "Exfoliant"],
+    [/spot|blemish|acne|pimple/, "Spot Treatment"],
+    [/toner|softener/, "Toner"],
+    [/essence/, "Essence"],
+    [/ampoule/, "Ampoule"],
+    [/serum/, "Serum"],
+    [/\boils?\b/, "Face Oil"],
+    [/cleanser|cleansing|face\s*wash|foam(ing)?|micellar|makeup remover/, "Cleanser"],
+    [/moistur|cream|emulsion|lotion|\bgel\b|balm|hydrat/, "Moisturizer / Cream"]
+  ];
+  for(const [re,type] of rules){ if(re.test(t))return type; }
+  return null;
+}
+function applyTypeGuess(){
+  if(typeof typeTouched!=="undefined" && typeTouched)return;
+  const g=guessType(document.getElementById("fName").value); if(!g)return;
+  document.getElementById("fCat").value="Skincare"; toggleTypeField();
+  document.getElementById("fType").value=g;
+}
 function digits(x){return (x||"").replace(/\D/g,"");}
 async function lookupBarcode(code){
   const s=document.getElementById("lookupStatus");
@@ -845,6 +893,147 @@ async function readProductPhoto(auto,tries){
       s.innerHTML="Couldn't pick a name"+(snip?" (saw: “"+snip+"…”)":" — the photo was too blurry/small")+". Retake a closer, straight shot of the front label, or <a href=\"https://www.google.com/search?q="+encodeURIComponent(snip||"cosmetic product name")+"\" target=\"_blank\" rel=\"noopener\">search it ↗</a> and type it.";
     }
   }catch(e){s.textContent="Couldn't read the photo: "+(e.message||e);}
+}
+
+/* ================= Import from a screenshot of another app ================= */
+// flexible date parser — handles many formats other apps use
+function monthNum(tok){return {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}[tok.slice(0,3)]||0;}
+function parseFlexible(s){ // -> {y,m,d?} or null
+  if(!s) return null; s=String(s).toLowerCase(); let m;
+  // month name: "december 21, 2028", "dec 2028", "21 dec 2028"
+  if(m=s.match(/\b(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\b/)){
+    const mo=monthNum(m[1]); const y=(s.match(/\b(20\d{2})\b/)||[])[1]; const d=(s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/)||[])[1];
+    if(mo&&y) return {y:+y,m:mo,d:(d&&+d>=1&&+d<=31)?+d:null};
+  }
+  // Japanese 2028年12月21日
+  if(m=s.match(/(20\d{2})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/)) return {y:+m[1],m:+m[2],d:m[3]?+m[3]:null};
+  // ISO-ish YYYY-MM-DD or YYYY-MM or YYYY/MM/DD or YYYY.MM
+  if(m=s.match(/\b(20\d{2})[-\/.](\d{1,2})(?:[-\/.](\d{1,2}))?\b/)) return {y:+m[1],m:+m[2],d:m[3]?+m[3]:null};
+  // X-Y-YYYY (ambiguous D-M vs M-D): use >12 to disambiguate, else assume D-M-Y
+  if(m=s.match(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](20\d{2})\b/)){
+    let a=+m[1],b=+m[2],y=+m[3],d,mo;
+    if(a>12){d=a;mo=b;} else if(b>12){mo=a;d=b;} else {d=a;mo=b;}
+    if(mo>12){const t=d;d=mo;mo=t;}
+    return {y,m:mo,d};
+  }
+  // X-YYYY (month-year)
+  if(m=s.match(/\b(\d{1,2})[-\/.](20\d{2})\b/)) return {y:+m[2],m:+m[1],d:null};
+  // bare year
+  if(m=s.match(/\b(20\d{2})\b/)) return {y:+m[1],m:null,d:null};
+  return null;
+}
+function parseAnyMonth(s){const p=parseFlexible(s); return (p&&p.m)?p.y+"-"+String(p.m).padStart(2,"0"):"";}
+function parseAnyFull(s){const p=parseFlexible(s); return (p&&p.m)?p.y+"-"+String(p.m).padStart(2,"0")+"-"+String(p.d||1).padStart(2,"0"):"";}
+function importParse(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length);
+  const stop=/^(brand|type|price|period|purchase|start|expiration|expiry|tags|more details|product name)/i;
+  const findIdx=re=>lines.findIndex(l=>re.test(l));
+  const after=re=>{const i=findIdx(re); if(i<0)return ""; const same=lines[i].replace(re,"").replace(/[:*]/g,"").trim(); if(same&&!stop.test(same))return same; const nx=lines[i+1]||""; return stop.test(nx)?"":nx;};
+  const near=re=>{const i=findIdx(re); if(i<0)return ""; return lines[i]+" "+(lines[i+1]||"");};
+  const o={};
+  o.name=after(/product\s*name/i);
+  o.brand=after(/^brand\b/i);
+  o.type=after(/^type\b/i);
+  o.expiry=parseAnyMonth(near(/expiration|expiry|\bexp\b|best before/i));
+  o.opened=parseAnyFull(near(/start of use|opened/i));
+  o.pao=(after(/period after opening/i).match(/\d+/)||[])[0]||"";
+  const notes=[];
+  const price=after(/^price/i); if(price)notes.push("Price: "+price);
+  const pd=parseAnyFull(near(/purchase date/i)); if(pd)notes.push("Purchased: "+pd);
+  const tags=after(/tags/i); if(tags&&!/separated with comma/i.test(tags))notes.push(tags);
+  o.notes=notes.join(" · ");
+  return o;
+}
+async function geminiExtractFields(text){
+  const LM=await geminiModel(); if(!LM)return null;
+  let session; try{session=await LM.create();}catch(_){return null;}
+  try{
+    const prompt="This is OCR text from a cosmetics app's product screen. Return ONLY compact JSON with keys "+
+      "brand,name,type,expiry,opened,pao,notes. Dates as YYYY-MM (expiry) or YYYY-MM-DD (opened). "+
+      "type must be one of: "+SKIN_TYPES.join(", ")+". Unknown fields = empty string. Text:\n"+(text||"").slice(0,900);
+    const out=await session.prompt(prompt);
+    try{session.destroy&&session.destroy();}catch(_){}
+    const m=(out||"").match(/\{[\s\S]*\}/); if(!m)return null;
+    return JSON.parse(m[0]);
+  }catch(e){return null;}
+}
+function applyImport(o){
+  o=o||{}; const filled=[];
+  if(o.name){document.getElementById("fName").value=o.name; filled.push("name");}
+  if(o.brand){document.getElementById("fBrand").value=o.brand; filled.push("brand");}
+  let ty=o.type?(SKIN_TYPES.includes(o.type)?o.type:guessType(o.type)):null;
+  if(!ty&&o.name)ty=guessType(o.name);
+  if(ty){document.getElementById("fCat").value="Skincare"; toggleTypeField(); document.getElementById("fType").value=ty; typeTouched=true; filled.push("type");}
+  const exp=(o.expiry||"").slice(0,7); if(/^\d{4}-\d{2}$/.test(exp)){document.getElementById("fExpiry").value=exp; filled.push("expiry");}
+  let op=o.opened||""; if(/^\d{4}-\d{2}$/.test(op))op+="-01"; if(/^\d{4}-\d{2}-\d{2}$/.test(op)){document.getElementById("fOpened").value=op; document.getElementById("moreDates").open=true; filled.push("opened");}
+  const pao=(String(o.pao||"").match(/\d+/)||[])[0];
+  if(pao&&["3","6","9","12","18","24","36"].includes(pao)){document.getElementById("fPao").value=pao; document.getElementById("moreDates").open=true; filled.push("PAO");}
+  if(o.notes){const n=document.getElementById("fNotes"); n.value=(n.value?n.value+" · ":"")+o.notes; document.getElementById("moreDetails").open=true;}
+  return filled;
+}
+async function geminiExtractMany(text){
+  const LM=await geminiModel(); if(!LM)return null;
+  let session; try{session=await LM.create();}catch(_){return null;}
+  try{
+    const prompt="OCR text from a cosmetics app that may list ONE OR MORE products. Return ONLY a JSON array; "+
+      "each element has keys brand,name,type,expiry,opened,pao,notes. expiry as YYYY-MM, opened as YYYY-MM-DD. "+
+      "type must be one of: "+SKIN_TYPES.join(", ")+". Empty string if unknown. Text:\n"+(text||"").slice(0,1400);
+    const out=await session.prompt(prompt);
+    try{session.destroy&&session.destroy();}catch(_){}
+    const m=(out||"").match(/\[[\s\S]*\]/); if(!m)return null;
+    const j=JSON.parse(m[0]); return Array.isArray(j)?j:null;
+  }catch(e){return null;}
+}
+function splitRecords(text){
+  const re=/product\s*name/ig; const idx=[]; let m;
+  while((m=re.exec(text)))idx.push(m.index);
+  if(idx.length<=1) return [text];
+  const out=[]; for(let i=0;i<idx.length;i++) out.push(text.slice(idx[i], idx[i+1]||text.length));
+  return out;
+}
+function readImageP(file){return new Promise(res=>readImage(file,res));}
+async function extractFromImage(dataURL){
+  const {data}=await Tesseract.recognize(await preprocessForOCR(dataURL),"eng");
+  const text=(data&&data.text)||"";
+  let arr=await Promise.race([geminiExtractMany(text), new Promise(r=>setTimeout(()=>r(null),10000))]);
+  if(Array.isArray(arr)&&arr.length) return arr;
+  return splitRecords(text).map(importParse);
+}
+async function saveImported(r){
+  const ty=r.type?(SKIN_TYPES.includes(r.type)?r.type:guessType(r.type)):(r.name?guessType(r.name):"");
+  const exp=(r.expiry||"").slice(0,7);
+  const it={
+    id:"it_"+Date.now()+"_"+Math.random().toString(36).slice(2,9),
+    brand:r.brand||"", name:r.name||"(imported)", category:"Skincare", type:ty||"",
+    expiry:/^\d{4}-\d{2}$/.test(exp)?exp:"", status:"sealed",
+    opened:/^\d{4}-\d{2}-\d{2}$/.test(r.opened||"")?r.opened:"",
+    pao:(String(r.pao||"").match(/\d+/)||[])[0]||"", mfg:"", shelf:"",
+    lot:"", qty:1, barcode:"", notes:r.notes||"", photo1:null, photo2:null, created:Date.now()
+  };
+  await putItem(it);
+}
+async function importScreenshots(files){
+  files=Array.from(files||[]); if(!files.length)return;
+  const s=document.getElementById("importStatus"); s.style.display="block";
+  if(!window.Tesseract){ s.textContent="Text reader still loading — wait a moment and try again."; return; }
+  s.textContent="Reading "+files.length+" screenshot"+(files.length>1?"s":"")+"…";
+  try{
+    let all=[];
+    for(const f of files){
+      const d=await readImageP(f);
+      const recs=await extractFromImage(d);
+      all=all.concat((recs||[]).filter(r=>r&&(r.name||r.brand||r.expiry)));
+    }
+    if(all.length<=1){
+      const filled=applyImport(all[0]||{});
+      s.innerHTML= filled.length ? ("✓ Imported: <b>"+filled.join(", ")+"</b> — please verify.") : "Couldn't read the fields. Try a sharper/cropped screenshot, or type them in.";
+      return;
+    }
+    if(!confirm("Found "+all.length+" products. Add them all to your inventory?")){ s.textContent="Cancelled — found "+all.length+" products."; return; }
+    let n=0; for(const r of all){ await saveImported(r); n++; }
+    ITEMS=await allItems(); refresh();
+    s.innerHTML="✓ Added <b>"+n+"</b> products. Close this form and review/edit them in your list.";
+  }catch(e){ s.textContent="Import failed: "+(e.message||e); }
 }
 
 /* ---- OCR the lot/date photo (Tesseract) ---- */
