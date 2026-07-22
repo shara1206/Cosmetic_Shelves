@@ -162,6 +162,8 @@
         <input type="file" id="p2" accept="image/*" capture="environment">
       </div>
     </div>
+    <div class="hint" id="nameOcrStatus" style="margin-bottom:4px"></div>
+    <button type="button" class="btn ghost" id="ocrNameBtn" style="width:100%;margin-bottom:8px;font-size:13px;padding:8px">🔎 Read product name from photo</button>
     <div class="hint" id="ocrStatus" style="margin-bottom:4px">The lot/date photo is read automatically to fill the expiry, lot &amp; make date.</div>
     <button type="button" class="btn ghost" id="ocrBtn" style="width:100%;margin-bottom:14px;font-size:13px;padding:8px">🔎 Re-read lot &amp; date photo</button>
 
@@ -610,7 +612,8 @@ document.getElementById("filter").onchange=renderList;
 document.getElementById("sort").onchange=renderList;
 document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
 document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
-document.getElementById("p1").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo1=d;setPhotoBtn("p1btn",d);});};
+document.getElementById("p1").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo1=d;setPhotoBtn("p1btn",d);if(!document.getElementById("fName").value)readProductPhoto(true);});};
+document.getElementById("ocrNameBtn").onclick=()=>readProductPhoto(false);
 document.getElementById("p2").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo2=d;setPhotoBtn("p2btn",d);readPhoto2();});};
 [document.getElementById("modal"),document.getElementById("detail")].forEach(m=>
   m.onclick=e=>{if(e.target===m)m.classList.remove("open");});
@@ -689,6 +692,81 @@ async function lookupBarcode(code){
     }
   }catch(e){}
   s.innerHTML="No online match — very common for cosmetics, esp. Japanese brands. <a href=\"https://www.google.com/search?q="+encodeURIComponent(code+" cosmetic product")+"\" target=\"_blank\" rel=\"noopener\">Search this barcode ↗</a> to find the name, type it once, and next time you scan it the app fills it in automatically. Barcode saved.";
+  // fallback: try reading the name off the product photo, if we have one and no name yet
+  if(photo1 && !document.getElementById("fName").value) readProductPhoto(true);
+}
+
+/* ---- Chrome built-in AI (Gemini Nano) — used to clean OCR text into name/brand ---- */
+async function geminiModel(){
+  try{
+    const LM=window.LanguageModel||(window.ai&&window.ai.languageModel);
+    if(!LM)return null;
+    if(LM.availability){const a=await LM.availability(); if(a==="unavailable")return null;}
+    else if(LM.capabilities){const c=await LM.capabilities(); if(c&&c.available==="no")return null;}
+    return LM;
+  }catch(_){return null;}
+}
+async function geminiExtractProduct(text){
+  const LM=await geminiModel(); if(!LM)return null;
+  let session;
+  try{session=await LM.create();}catch(_){try{session=await LM.create({});}catch(e){return null;}}
+  try{
+    const prompt="You are reading text from a cosmetic product label (may be messy OCR). "+
+      "Identify the BRAND and the PRODUCT NAME. Reply on ONE line exactly as: Brand | Product Name. "+
+      "Use ? if a part is unknown. Label text:\n\""+(text||"").slice(0,700)+"\"";
+    const out=await session.prompt(prompt);
+    try{session.destroy&&session.destroy();}catch(_){}
+    const line=((out||"").split("\n").map(x=>x.trim()).filter(Boolean)[0]||"");
+    const p=line.split("|").map(x=>x.trim());
+    const brand=(p[0]&&p[0]!=="?")?p[0]:"";
+    const name=(p[1]&&p[1]!=="?")?p[1]:"";
+    return (brand||name)?{brand,name}:null;
+  }catch(e){return null;}
+}
+
+/* ---- OCR the PRODUCT photo to guess the name/brand (fallback) ---- */
+async function readProductPhoto(auto){
+  if(!photo1){ if(!auto)alert("Take the product photo first."); return; }
+  if(!window.Tesseract){ if(!auto)document.getElementById("nameOcrStatus").textContent="OCR needs internet to load."; return; }
+  const s=document.getElementById("nameOcrStatus");
+  s.textContent="Reading the label…";
+  try{
+    const {data}=await Tesseract.recognize(photo1,"eng");
+    const text=(data&&data.text)||"";
+    // Try Chrome's built-in Gemini first (cleans messy OCR into brand + name)
+    const g=await geminiExtractProduct(text);
+    if(g&&(g.name||g.brand)){
+      if(g.brand)setIfEmpty("fBrand",g.brand);
+      if(g.name)setIfEmpty("fName",g.name);
+      s.innerHTML="✨ Gemini read "+(g.name?"name <b>"+g.name+"</b>":"")+((g.name&&g.brand)?" · ":"")+(g.brand?"brand <b>"+g.brand+"</b>":"")+" — verify.";
+      return;
+    }
+    // candidate lines: prefer taller text (bigger = product name); fall back to line length
+    let lines=[];
+    if(data.lines&&data.lines.length){
+      lines=data.lines.map(l=>({t:(l.text||"").replace(/\s+/g," ").trim(),h:(l.bbox?(l.bbox.y1-l.bbox.y0):0)}));
+    }else{
+      lines=text.split(/\n+/).map(t=>({t:t.replace(/\s+/g," ").trim(),h:t.trim().length}));
+    }
+    lines=lines.filter(l=>l.t.replace(/[^A-Za-z0-9]/g,"").length>=3
+      && !/^\d+\s*(ML|ML\.|FL|OZ|G|GR|GRAM)/i.test(l.t)
+      && !/(WWW\.|HTTP|LOT|EXP|BATCH|MADE IN|INGREDIENTS)/i.test(l.t));
+    lines.sort((a,b)=>b.h-a.h);
+    // brand from known list
+    const allBrands=[...CUSTOM_BRANDS,...BRANDS_US,...BRANDS_JP];
+    const up=text.toUpperCase();
+    const brandHit=allBrands.find(b=>up.includes(b.toUpperCase()));
+    if(brandHit)setIfEmpty("fBrand",brandHit);
+    // name = tallest meaningful line that isn't just the brand
+    const nameCand=lines.find(l=>l.t.length>=3 && (!brandHit||l.t.toUpperCase()!==brandHit.toUpperCase()));
+    const name=(nameCand||lines[0]||{}).t||"";
+    if(name)setIfEmpty("fName",name);
+    if(name||brandHit){
+      s.innerHTML="Read "+(name?"name <b>"+name+"</b>":"")+((name&&brandHit)?" · ":"")+(brandHit?"brand <b>"+brandHit+"</b>":"")+" — please verify.";
+    }else{
+      s.textContent="Couldn't read the name clearly. Type it, or retake a closer photo of the front label.";
+    }
+  }catch(e){s.textContent="Couldn't read the photo: "+(e.message||e);}
 }
 
 /* ---- OCR the lot/date photo (Tesseract) ---- */
