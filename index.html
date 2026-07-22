@@ -55,6 +55,16 @@
   .tag{font-size:11px;background:#f3ebef;color:#7a6a74;padding:2px 8px;border-radius:20px}
   .exp{font-size:12px;font-weight:600}
   .exp.red{color:var(--red)} .exp.amber{color:var(--amber)} .exp.green{color:var(--green)} .exp.gray{color:var(--muted)}
+  /* gallery view */
+  .gwrap{margin-bottom:8px}
+  .ghead{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;margin:16px 2px 9px;color:var(--ink)}
+  .gcount{font-size:12px;color:#fff;background:var(--pink);border-radius:20px;padding:1px 10px;font-weight:700}
+  .ggrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .gcell{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f0e8ec;box-shadow:var(--shadow);cursor:pointer}
+  .gcell img{width:100%;height:100%;object-fit:cover;display:block}
+  .gcell .gph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:26px;color:#c9bcc4}
+  .gcell .gflag{position:absolute;left:6px;top:6px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.3)}
+  .gcell .gname{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.62));color:#fff;font-size:10px;line-height:1.2;padding:12px 6px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .empty{text-align:center;color:var(--muted);padding:50px 20px}
   .empty .big{font-size:44px;margin-bottom:10px}
   /* fab */
@@ -128,6 +138,7 @@
       <option value="name">Name</option>
       <option value="brand">Brand</option>
     </select>
+    <button class="filter" id="viewToggle" title="Switch view" style="cursor:pointer">▦ Gallery</button>
   </div>
   <div id="list"></div>
 </div>
@@ -193,8 +204,8 @@
     <div class="sec">Expiry</div>
     <div class="row2">
       <div class="field">
-        <label>Expiry date</label>
-        <input type="date" id="fExpiry">
+        <label>Expiry (year &amp; month)</label>
+        <input type="month" id="fExpiry">
       </div>
       <div class="field">
         <label>Status</label>
@@ -224,8 +235,8 @@
       </div>
       <div class="row2">
         <div class="field">
-          <label>Manufacture date</label>
-          <input type="date" id="fMfg">
+          <label>Manufacture (year &amp; month)</label>
+          <input type="month" id="fMfg">
         </div>
         <div class="field">
           <label>Shelf life</label>
@@ -354,32 +365,45 @@ function putItem(it){return new Promise(r=>{tx("readwrite").put(it).onsuccess=()
 function delItem(id){return new Promise(r=>{tx("readwrite").delete(id).onsuccess=()=>r();});}
 function allItems(){return new Promise(r=>{tx("readonly").getAll().onsuccess=e=>r(e.target.result);});}
 
-/* ---------- expiry logic ---------- */
-function addMonths(dateStr,n){const d=new Date(dateStr);d.setMonth(d.getMonth()+parseInt(n));return d.toISOString().slice(0,10);}
+/* ---------- expiry logic (year-month friendly) ---------- */
+// expand "YYYY-MM" -> last day of that month; pass through "YYYY-MM-DD"
+function toFullDate(s){
+  if(!s) return null;
+  if(/^\d{4}-\d{2}$/.test(s)){const y=+s.slice(0,4),m=+s.slice(5,7);return s+"-"+String(new Date(y,m,0).getDate()).padStart(2,"0");}
+  return s;
+}
+function addMonths(dateStr,n){const f=toFullDate(dateStr);const d=new Date(f+"T00:00:00");d.setMonth(d.getMonth()+parseInt(n));return d.toISOString().slice(0,7);} // return YYYY-MM
 function effectiveExpiry(it){
-  if(it.expiry) return it.expiry;
+  if(it.expiry) return it.expiry;                    // usually "YYYY-MM"
   if(it.opened && it.pao) return addMonths(it.opened,it.pao);
   if(it.mfg && it.shelf) return addMonths(it.mfg,it.shelf);
   return null;
 }
 function daysLeft(dateStr){
   if(!dateStr) return null;
-  const ms=new Date(dateStr+"T00:00:00")-new Date(new Date().toDateString());
+  const ms=new Date(toFullDate(dateStr)+"T00:00:00")-new Date(new Date().toDateString());
   return Math.round(ms/86400000);
 }
 function flagFor(it){
   if(it.status==="finished") return {c:"gray",label:"Finished"};
   const exp=effectiveExpiry(it); const d=daysLeft(exp);
   if(d===null) return {c:"gray",label:"No date"};
-  if(d<0) return {c:"red",label:"Expired "+Math.abs(d)+"d ago"};
+  if(d<0) return {c:"red",label:"Expired"};
+  const mo=Math.round(d/30);
   if(d<=30) return {c:"amber",label:d+"d left"};
-  return {c:"green",label:d+"d left"};
+  return {c:"green",label:(mo>=2?mo+" mo left":d+"d left")};
 }
-function fmtDate(s){return s?new Date(s+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"—";}
+function fmtDate(s){
+  if(!s) return "—";
+  if(/^\d{4}-\d{2}$/.test(s)){const y=+s.slice(0,4),m=+s.slice(5,7);return new Date(y,m-1,1).toLocaleDateString(undefined,{year:"numeric",month:"short"});}
+  return new Date(s+"T00:00:00").toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+}
 
 /* ---------- state ---------- */
 let ITEMS=[]; let editId=null;
 let photo1=null, photo2=null;
+let viewMode=localStorage.getItem("viewMode")||"list";
+const FLAGCOLOR={red:"#e05656",amber:"#e0a13a",green:"#3fa66a",gray:"#c9bcc4"};
 
 /* ---------- rendering ---------- */
 function renderStats(){
@@ -406,11 +430,12 @@ function renderList(){
     if(sort==="name")return (a.name||"").localeCompare(b.name||"");
     if(sort==="brand")return (a.brand||"").localeCompare(b.brand||"");
     const ea=effectiveExpiry(a),eb=effectiveExpiry(b);
-    if(!ea)return 1; if(!eb)return -1; return ea.localeCompare(eb);
+    if(!ea)return 1; if(!eb)return -1; return (toFullDate(ea)).localeCompare(toFullDate(eb));
   });
   const list=document.getElementById("list");
   if(!arr.length){list.innerHTML=`<div class="empty"><div class="big">🧴</div>
     ${ITEMS.length?"No matches.":"No products yet.<br>Tap + to add your first one."}</div>`;return;}
+  if(viewMode==="gallery"){ renderGallery(list,arr); return; }
   list.innerHTML=arr.map(it=>{
     const f=flagFor(it); const exp=effectiveExpiry(it);
     const thumb=it.photo1?`<img class="thumb" src="${it.photo1}">`:`<div class="thumb ph">🧴</div>`;
@@ -424,6 +449,26 @@ function renderList(){
       </div></div>`;
   }).join("");
   list.querySelectorAll(".item").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
+}
+/* gallery grouped by type (skincare type, else category) with a count per group */
+function renderGallery(list,arr){
+  const groups={};
+  arr.forEach(it=>{const k=it.type||it.category||"Other"; (groups[k]=groups[k]||[]).push(it);});
+  const order=[...SKIN_TYPES,...CATEGORIES];
+  const keys=Object.keys(groups).sort((a,b)=>{
+    let ia=order.indexOf(a),ib=order.indexOf(b); if(ia<0)ia=999; if(ib<0)ib=999;
+    return ia-ib || a.localeCompare(b);
+  });
+  list.innerHTML=keys.map(k=>{
+    const items=groups[k];
+    const cells=items.map(it=>{
+      const f=flagFor(it);
+      const thumb=it.photo1?`<img src="${it.photo1}">`:`<div class="gph">🧴</div>`;
+      return `<div class="gcell" data-id="${it.id}">${thumb}<span class="gflag" style="background:${FLAGCOLOR[f.c]||'#ccc'}"></span><span class="gname">${it.name||"Untitled"}</span></div>`;
+    }).join("");
+    return `<div class="gwrap"><div class="ghead">${k} <span class="gcount">${items.length}</span></div><div class="ggrid">${cells}</div></div>`;
+  }).join("");
+  list.querySelectorAll(".gcell").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
 }
 function refresh(){renderStats();renderList();}
 
@@ -546,9 +591,9 @@ function openModal(it){
   const g=id=>document.getElementById(id);
   g("fBrand").value=it?.brand||""; g("fName").value=it?.name||"";
   g("fCat").value=it?.category||"Skincare"; g("fType").value=it?.type||"Serum";
-  g("fExpiry").value=it?.expiry||""; g("fStatus").value=it?.status||"sealed";
+  g("fExpiry").value=(it?.expiry||"").slice(0,7); g("fStatus").value=it?.status||"sealed";
   g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
-  g("fMfg").value=it?.mfg||""; g("fShelf").value=it?.shelf||"";
+  g("fMfg").value=(it?.mfg||"").slice(0,7); g("fShelf").value=it?.shelf||"";
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
   g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
   photo1=it?.photo1||null; photo2=it?.photo2||null;
@@ -610,6 +655,9 @@ document.getElementById("saveBtn").onclick=save;
 document.getElementById("search").oninput=renderList;
 document.getElementById("filter").onchange=renderList;
 document.getElementById("sort").onchange=renderList;
+function updateViewToggle(){document.getElementById("viewToggle").textContent=viewMode==="gallery"?"☰ List":"▦ Gallery";}
+document.getElementById("viewToggle").onclick=()=>{viewMode=viewMode==="gallery"?"list":"gallery";localStorage.setItem("viewMode",viewMode);updateViewToggle();renderList();};
+updateViewToggle();
 document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
 document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
 document.getElementById("p1").onchange=e=>{if(e.target.files[0])readImage(e.target.files[0],d=>{photo1=d;setPhotoBtn("p1btn",d);if(!document.getElementById("fName").value)readProductPhoto(true);});};
@@ -696,14 +744,37 @@ async function lookupBarcode(code){
   if(photo1 && !document.getElementById("fName").value) readProductPhoto(true);
 }
 
+/* ---- upscale + grayscale + contrast to boost OCR accuracy ---- */
+function preprocessForOCR(dataURL){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(2.2, 1700/Math.max(img.width,img.height));
+      const w=Math.max(1,Math.round(img.width*scale)), hh=Math.max(1,Math.round(img.height*scale));
+      const c=document.createElement("canvas"); c.width=w; c.height=hh;
+      const ctx=c.getContext("2d"); ctx.drawImage(img,0,0,w,hh);
+      try{
+        const im=ctx.getImageData(0,0,w,hh), d=im.data;
+        for(let i=0;i<d.length;i+=4){let g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; g=(g-128)*1.35+132; d[i]=d[i+1]=d[i+2]=g<0?0:g>255?255:g;}
+        ctx.putImageData(im,0,0);
+      }catch(_){}
+      res(c.toDataURL("image/png"));
+    };
+    img.onerror=()=>res(dataURL);
+    img.src=dataURL;
+  });
+}
+
 /* ---- Chrome built-in AI (Gemini Nano) — used to clean OCR text into name/brand ---- */
 async function geminiModel(){
   try{
     const LM=window.LanguageModel||(window.ai&&window.ai.languageModel);
     if(!LM)return null;
-    if(LM.availability){const a=await LM.availability(); if(a==="unavailable")return null;}
-    else if(LM.capabilities){const c=await LM.capabilities(); if(c&&c.available==="no")return null;}
-    return LM;
+    // ONLY use when the model is already downloaded & ready — otherwise create() can hang on a download
+    let ready=false;
+    if(LM.availability){const a=await LM.availability(); ready=(a==="available");}
+    else if(LM.capabilities){const c=await LM.capabilities(); ready=(c&&c.available==="readily");}
+    return ready?LM:null;
   }catch(_){return null;}
 }
 async function geminiExtractProduct(text){
@@ -725,16 +796,22 @@ async function geminiExtractProduct(text){
 }
 
 /* ---- OCR the PRODUCT photo to guess the name/brand (fallback) ---- */
-async function readProductPhoto(auto){
-  if(!photo1){ if(!auto)alert("Take the product photo first."); return; }
-  if(!window.Tesseract){ if(!auto)document.getElementById("nameOcrStatus").textContent="OCR needs internet to load."; return; }
+async function readProductPhoto(auto,tries){
+  tries=tries||0;
   const s=document.getElementById("nameOcrStatus");
+  if(!photo1){ if(!auto)alert("Take the product photo first."); return; }
+  if(!window.Tesseract){
+    if(tries>10){ s.textContent="Text reader couldn't load (needs internet the first time)."; return; }
+    s.textContent="Loading text reader…";
+    setTimeout(()=>readProductPhoto(auto,tries+1),1500); return;
+  }
   s.textContent="Reading the label…";
   try{
-    const {data}=await Tesseract.recognize(photo1,"eng");
+    const img=await preprocessForOCR(photo1);
+    const {data}=await Tesseract.recognize(img,"eng");
     const text=(data&&data.text)||"";
-    // Try Chrome's built-in Gemini first (cleans messy OCR into brand + name)
-    const g=await geminiExtractProduct(text);
+    // Try Chrome's built-in Gemini first (cleans messy OCR into brand + name), with a timeout so it never blocks
+    const g=await Promise.race([geminiExtractProduct(text), new Promise(r=>setTimeout(()=>r(null),8000))]);
     if(g&&(g.name||g.brand)){
       if(g.brand)setIfEmpty("fBrand",g.brand);
       if(g.name)setIfEmpty("fName",g.name);
@@ -764,7 +841,8 @@ async function readProductPhoto(auto){
     if(name||brandHit){
       s.innerHTML="Read "+(name?"name <b>"+name+"</b>":"")+((name&&brandHit)?" · ":"")+(brandHit?"brand <b>"+brandHit+"</b>":"")+" — please verify.";
     }else{
-      s.textContent="Couldn't read the name clearly. Type it, or retake a closer photo of the front label.";
+      const snip=(text||"").replace(/\s+/g," ").trim().slice(0,60);
+      s.innerHTML="Couldn't pick a name"+(snip?" (saw: “"+snip+"…”)":" — the photo was too blurry/small")+". Retake a closer, straight shot of the front label, or <a href=\"https://www.google.com/search?q="+encodeURIComponent(snip||"cosmetic product name")+"\" target=\"_blank\" rel=\"noopener\">search it ↗</a> and type it.";
     }
   }catch(e){s.textContent="Couldn't read the photo: "+(e.message||e);}
 }
@@ -776,13 +854,13 @@ async function readPhoto2(){
   const s=document.getElementById("ocrStatus");
   s.textContent="Reading text… first run downloads the engine (~few MB).";
   try{
-    const {data}=await Tesseract.recognize(photo2,"eng");
+    const {data}=await Tesseract.recognize(await preprocessForOCR(photo2),"eng");
     const text=(data&&data.text)||"";
     const lot=parseLot(text);
     const {exp,mfg}=parseExpMfg(text);
     if(lot){document.getElementById("fLot").value=lot;document.getElementById("moreDetails").open=true;}
-    if(exp)document.getElementById("fExpiry").value=exp;
-    if(mfg){document.getElementById("fMfg").value=mfg;document.getElementById("moreDates").open=true;}
+    if(exp)document.getElementById("fExpiry").value=exp.slice(0,7);
+    if(mfg){document.getElementById("fMfg").value=mfg.slice(0,7);document.getElementById("moreDates").open=true;}
     const bits=[];
     if(lot)bits.push("lot <b>"+lot+"</b>");
     if(exp)bits.push("expiry <b>"+fmtDate(exp)+"</b>");
