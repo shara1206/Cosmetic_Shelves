@@ -147,7 +147,7 @@
     <div class="field">
       <label>Brand <button type="button" id="brandManageBtn" style="float:right;background:none;border:none;color:var(--pink-dark);font-size:12px;font-weight:600;cursor:pointer;padding:0">Manage</button></label>
       <input id="fBrand" placeholder="Type or tap a brand below">
-      <div class="hint" id="brandManageHint" style="display:none;margin-top:4px">Tap a brand to hide/unhide it. Hidden brands won't show in the picker.</div>
+      <div class="hint" id="brandManageHint" style="display:none;margin-top:4px">Add your own brands, or tap a listed brand to hide/unhide it. Tap 🗑 on your own brands to remove them.</div>
       <div class="chips" id="brandChips"></div>
     </div>
     <div class="field">
@@ -192,7 +192,23 @@
         </select>
       </div>
     </div>
-    <div class="hint" style="margin-top:-6px;margin-bottom:12px">No printed expiry? Set the open date + PAO (the open-jar “12M” symbol) and the app computes expiry.</div>
+    <div class="row2">
+      <div class="field">
+        <label>Manufacture date</label>
+        <input type="date" id="fMfg">
+      </div>
+      <div class="field">
+        <label>Shelf life (unopened)</label>
+        <select id="fShelf">
+          <option value="">—</option>
+          <option value="12">1 year</option>
+          <option value="24">2 years</option>
+          <option value="36">3 years</option>
+          <option value="60">5 years</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:-6px;margin-bottom:12px">Expiry is used if set. Otherwise the app computes it from open date + PAO, or from manufacture date + shelf life (most cosmetics last ~3 yrs unopened).</div>
     <div class="row2">
       <div class="field">
         <label>Lot / batch number</label>
@@ -310,12 +326,11 @@ function delItem(id){return new Promise(r=>{tx("readwrite").delete(id).onsuccess
 function allItems(){return new Promise(r=>{tx("readonly").getAll().onsuccess=e=>r(e.target.result);});}
 
 /* ---------- expiry logic ---------- */
+function addMonths(dateStr,n){const d=new Date(dateStr);d.setMonth(d.getMonth()+parseInt(n));return d.toISOString().slice(0,10);}
 function effectiveExpiry(it){
   if(it.expiry) return it.expiry;
-  if(it.opened && it.pao){
-    const d=new Date(it.opened); d.setMonth(d.getMonth()+parseInt(it.pao));
-    return d.toISOString().slice(0,10);
-  }
+  if(it.opened && it.pao) return addMonths(it.opened,it.pao);
+  if(it.mfg && it.shelf) return addMonths(it.mfg,it.shelf);
   return null;
 }
 function daysLeft(dateStr){
@@ -398,6 +413,8 @@ function showDetail(id){
     <div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>
     ${row("Opened",it.opened?fmtDate(it.opened):"")}
     ${row("PAO",it.pao?it.pao+" months":"")}
+    ${row("Manufactured",it.mfg?fmtDate(it.mfg):"")}
+    ${row("Shelf life",it.shelf?(it.shelf/12)+" yr unopened":"")}
     ${row("Status",it.status)}
     ${row("Lot / batch",it.lot)}
     ${row("Barcode",it.barcode)}
@@ -435,27 +452,52 @@ function buildSelects(){
 }
 
 /* ---- brand chips with hide/manage ---- */
-let HIDDEN_BRANDS=[]; let manageMode=false;
+let HIDDEN_BRANDS=[]; let manageMode=false; let CUSTOM_BRANDS=[];
 try{HIDDEN_BRANDS=JSON.parse(localStorage.getItem("hiddenBrands")||"[]");}catch(_){}
+try{CUSTOM_BRANDS=JSON.parse(localStorage.getItem("customBrands")||"[]");}catch(_){}
 function saveHidden(){try{localStorage.setItem("hiddenBrands",JSON.stringify(HIDDEN_BRANDS));}catch(_){}}
+function saveCustom(){try{localStorage.setItem("customBrands",JSON.stringify(CUSTOM_BRANDS));}catch(_){}}
+function grpLabel(t){return `<div style="width:100%;font-size:11px;color:var(--muted);margin:6px 0 2px">${t}</div>`;}
 function renderBrandChips(){
   const chips=document.getElementById("brandChips");
   const cur=document.getElementById("fBrand").value;
-  const grp=(label,arr)=>{
-    const vis=arr.filter(b=>manageMode||!HIDDEN_BRANDS.includes(b));
-    if(!vis.length) return "";
-    return `<div style="width:100%;font-size:11px;color:var(--muted);margin:6px 0 2px">${label}</div>`+
-      vis.map(b=>{
-        const hid=HIDDEN_BRANDS.includes(b);
-        const mark=manageMode?(hid?"＋ ":"✕ "):"";
-        return `<span class="chip${cur===b?" on":""}${hid?" hidden-chip":""}" data-b="${b}">${mark}${b}</span>`;
-      }).join("");
+  const seededChip=b=>{
+    const hid=HIDDEN_BRANDS.includes(b);
+    if(!manageMode&&hid)return "";
+    const mark=manageMode?(hid?"＋ ":"✕ "):"";
+    return `<span class="chip${cur===b?" on":""}${hid?" hidden-chip":""}" data-b="${b}">${mark}${b}</span>`;
   };
-  chips.innerHTML=grp("🇺🇸 US / Western",BRANDS_US)+grp("🇯🇵 Japan",BRANDS_JP);
+  const customChip=b=>`<span class="chip${cur===b?" on":""}" data-b="${b}" data-custom="1">${manageMode?"🗑 ":""}${b}</span>`;
+  const grp=(label,arr,fn)=>{const h=arr.map(fn).join("");return h.replace(/\s/g,"")?grpLabel(label)+h:"";};
+
+  let html="";
+  if(manageMode){
+    html+=`<div style="width:100%;display:flex;gap:6px;margin-bottom:6px">
+      <input id="newBrand" placeholder="Add a brand — e.g. Albion" style="flex:1;padding:9px 11px;border:1px solid var(--line);border-radius:10px;font-size:14px">
+      <button type="button" id="addBrandBtn" class="btn primary" style="flex:none;padding:9px 14px">Add</button></div>`;
+  }
+  if(CUSTOM_BRANDS.length) html+=grp("⭐ My brands",CUSTOM_BRANDS,customChip);
+  html+=grp("🇺🇸 US / Western",BRANDS_US,seededChip);
+  html+=grp("🇯🇵 Japan",BRANDS_JP,seededChip);
+  chips.innerHTML=html;
+
+  if(manageMode){
+    const add=()=>{
+      const inp=document.getElementById("newBrand");
+      const v=(inp.value||"").trim();
+      if(!v)return;
+      const exists=[...CUSTOM_BRANDS,...BRANDS_US,...BRANDS_JP].some(x=>x.toLowerCase()===v.toLowerCase());
+      if(!exists){CUSTOM_BRANDS.push(v);saveCustom();}
+      renderBrandChips();
+    };
+    document.getElementById("addBrandBtn").onclick=add;
+    document.getElementById("newBrand").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();add();}};
+  }
   chips.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
-    const b=c.dataset.b;
+    const b=c.dataset.b, isCustom=c.dataset.custom==="1";
     if(manageMode){
-      if(HIDDEN_BRANDS.includes(b))HIDDEN_BRANDS=HIDDEN_BRANDS.filter(x=>x!==b);
+      if(isCustom){CUSTOM_BRANDS=CUSTOM_BRANDS.filter(x=>x!==b);saveCustom();}
+      else if(HIDDEN_BRANDS.includes(b))HIDDEN_BRANDS=HIDDEN_BRANDS.filter(x=>x!==b);
       else HIDDEN_BRANDS.push(b);
       saveHidden(); renderBrandChips();
     }else{
@@ -477,6 +519,7 @@ function openModal(it){
   g("fCat").value=it?.category||"Skincare"; g("fType").value=it?.type||"Serum";
   g("fExpiry").value=it?.expiry||""; g("fStatus").value=it?.status||"sealed";
   g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
+  g("fMfg").value=it?.mfg||""; g("fShelf").value=it?.shelf||"";
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
   g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
   photo1=it?.photo1||null; photo2=it?.photo2||null;
@@ -520,6 +563,8 @@ async function save(){
     status:document.getElementById("fStatus").value,
     opened:document.getElementById("fOpened").value,
     pao:document.getElementById("fPao").value,
+    mfg:document.getElementById("fMfg").value,
+    shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
     photo1, photo2, created:editId?undefined:Date.now()
   };
@@ -576,26 +621,44 @@ function onBarcode(code){
   lookupBarcode(code);
 }
 
-/* ---- auto-lookup via Open Beauty Facts ---- */
+/* ---- auto-lookup: your history → Open Beauty Facts → UPCitemdb ---- */
+function setIfEmpty(id,val){const el=document.getElementById(id);if(val&&!el.value)el.value=val;}
+function digits(x){return (x||"").replace(/\D/g,"");}
 async function lookupBarcode(code){
   const s=document.getElementById("lookupStatus");
+  // 1) your own past items — reliable & offline
+  const prev=ITEMS.find(it=>it.barcode&&digits(it.barcode)===digits(code));
+  if(prev){
+    setIfEmpty("fBrand",prev.brand); setIfEmpty("fName",prev.name);
+    if(prev.category){document.getElementById("fCat").value=prev.category;toggleTypeField();}
+    if(prev.type)document.getElementById("fType").value=prev.type;
+    s.innerHTML="✓ Recognized from your inventory: <b>"+((prev.brand||"")+" "+(prev.name||"")).trim()+"</b>";
+    return;
+  }
   s.textContent="🔎 Looking up "+code+"…";
+  // 2) Open Beauty Facts
   try{
     const r=await fetch("https://world.openbeautyfacts.org/api/v2/product/"+encodeURIComponent(code)+".json");
     const j=await r.json();
-    if(j&&j.status===1&&j.product){
-      const p=j.product;
-      const brand=(p.brands||"").split(",")[0].trim();
-      const name=p.product_name||p.generic_name||"";
-      if(brand&&!document.getElementById("fBrand").value)document.getElementById("fBrand").value=brand;
-      if(name&&!document.getElementById("fName").value)document.getElementById("fName").value=name;
-      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify &amp; edit.";
-    }else{
-      s.textContent="No database match (common for cosmetics) — enter details manually. Barcode saved.";
+    if(j&&j.status===1&&j.product&&(j.product.product_name||j.product.brands)){
+      const p=j.product, brand=(p.brands||"").split(",")[0].trim(), name=p.product_name||p.generic_name||"";
+      setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
+      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
+      return;
     }
-  }catch(e){
-    s.textContent="Lookup unavailable (offline?). Barcode saved.";
-  }
+  }catch(e){}
+  // 3) UPCitemdb (broader, US-focused) fallback
+  try{
+    const r=await fetch("https://api.upcitemdb.com/prod/trial/lookup?upc="+encodeURIComponent(code));
+    const j=await r.json();
+    if(j&&j.items&&j.items.length){
+      const it=j.items[0], brand=it.brand||"", name=it.title||"";
+      setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
+      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
+      return;
+    }
+  }catch(e){}
+  s.innerHTML="No online match — very common for cosmetics (especially Japanese brands, which are rarely in these databases). Type the name once; next time you scan this same barcode the app recognizes it. Barcode saved.";
 }
 
 /* ---- OCR the lot/date photo (Tesseract) ---- */
@@ -607,15 +670,54 @@ async function readPhoto2(){
   try{
     const {data}=await Tesseract.recognize(photo2,"eng");
     const text=(data&&data.text)||"";
-    const lot=parseLot(text), date=parseDate(text);
+    const lot=parseLot(text);
+    const {exp,mfg}=parseExpMfg(text);
     if(lot)document.getElementById("fLot").value=lot;
-    if(date)document.getElementById("fExpiry").value=date;
-    if(lot||date){
-      s.innerHTML="Read "+(lot?"lot <b>"+lot+"</b>":"")+(lot&&date?" · ":"")+(date?"expiry <b>"+fmtDate(date)+"</b>":"")+" — please verify.";
+    if(exp)document.getElementById("fExpiry").value=exp;
+    if(mfg)document.getElementById("fMfg").value=mfg;
+    const bits=[];
+    if(lot)bits.push("lot <b>"+lot+"</b>");
+    if(exp)bits.push("expiry <b>"+fmtDate(exp)+"</b>");
+    if(mfg)bits.push("made <b>"+fmtDate(mfg)+"</b>");
+    if(exp||mfg||lot){
+      let msg="Read "+bits.join(" · ")+" — please verify.";
+      if(lot&&!exp&&!mfg){
+        msg="Found batch code <b>"+lot+"</b> but no printed date. Many cosmetics (esp. Japanese &amp; US) hide the date <i>inside</i> the batch code. Decode it at <a href=\"https://checkcosmetic.net\" target=\"_blank\" rel=\"noopener\">checkcosmetic.net</a> or <a href=\"https://checkfresh.com\" target=\"_blank\" rel=\"noopener\">checkfresh.com</a>, then enter the manufacture date + shelf life above.";
+      }
+      s.innerHTML=msg;
     }else{
-      s.textContent="Couldn't detect a lot/date. Enter manually, or retake a clearer, closer photo.";
+      s.textContent="Couldn't detect a lot or date. Retake a closer, well-lit photo, or enter manually.";
     }
   }catch(e){s.textContent="OCR failed: "+(e.message||e);}
+}
+/* returns {exp, mfg} by matching all dates and their nearest label */
+const MONTHS={JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12};
+function parseExpMfg(raw){
+  const t=raw.toUpperCase();
+  const found=[]; let m,re;
+  const push=(idx,y,mo,d)=>{const v=d?iso(y,mo,d):eom(y,mo); if(v)found.push({idx,d:v});};
+  re=/\b(20\d{2})[.\-\/ ]?(\d{1,2})[.\-\/ ]?(\d{1,2})\b/g; while((m=re.exec(t)))push(m.index,m[1],m[2],m[3]);
+  re=/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](20\d{2})\b/g; while((m=re.exec(t)))push(m.index,m[3],m[2],m[1]);
+  re=/\b([A-Z]{3})[.\-\/ ]?(20\d{2})\b/g; while((m=re.exec(t))){if(MONTHS[m[1]])push(m.index,m[2],MONTHS[m[1]]);}
+  re=/\b(20\d{2})[.\-\/ ]?([A-Z]{3})\b/g; while((m=re.exec(t))){if(MONTHS[m[2]])push(m.index,m[1],MONTHS[m[2]]);}
+  re=/\b(20\d{2})[.\-\/](\d{1,2})(?![.\-\/]?\d)/g; while((m=re.exec(t))){if(+m[2]>=1&&+m[2]<=12)push(m.index,m[1],m[2]);}
+  re=/\b(\d{1,2})[.\-\/](20\d{2})\b/g; while((m=re.exec(t)))push(m.index,m[2],m[1]);
+  if(!found.length)return {exp:null,mfg:null};
+  const expPos=[...t.matchAll(/EXP|BBE|BEST BEFORE|USE BY|\bBB\b/g)].map(x=>x.index);
+  const mfgPos=[...t.matchAll(/MFG|MFD|PROD|MANUF|\bMFG\b/g)].map(x=>x.index);
+  const nearest=(arr,i)=>arr.length?arr.reduce((b,p)=>Math.min(b,Math.abs(p-i)),1e9):1e9;
+  const scored=found.map(f=>({d:f.d,e:nearest(expPos,f.idx),g:nearest(mfgPos,f.idx)}));
+  let exp=null,mfg=null;
+  const expCand=scored.filter(x=>x.e<x.g&&x.e<40).sort((a,b)=>a.e-b.e);
+  const mfgCand=scored.filter(x=>x.g<x.e&&x.g<40).sort((a,b)=>a.g-b.g);
+  if(expCand.length)exp=expCand[0].d;
+  if(mfgCand.length)mfg=mfgCand[0].d;
+  if(!exp&&!mfg){
+    const uniq=[...new Set(found.map(f=>f.d))].sort();
+    if(uniq.length>=2){mfg=uniq[0];exp=uniq[uniq.length-1];}
+    else exp=uniq[0];
+  }
+  return {exp,mfg};
 }
 
 /* ---- text parsers ---- */
