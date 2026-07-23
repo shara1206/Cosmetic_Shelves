@@ -7,8 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Cosmetics">
-<title>Cosmetic Inventory</title>
+<meta name="apple-mobile-web-app-title" content="Skincare Shelves">
+<title>Skincare Shelves</title>
 <link rel="icon" id="iconLink">
 <link rel="apple-touch-icon" id="appleIcon">
 <link rel="manifest" id="manifestLink">
@@ -125,7 +125,7 @@
 <body>
 <header>
   <button id="menuBtn" style="position:absolute;right:14px;top:14px;background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:10px;padding:8px 12px;font-size:16px">⚙</button>
-  <h1><img id="hdrIcon" alt="" style="width:30px;height:30px;border-radius:8px;object-fit:cover;vertical-align:-9px;margin-right:6px"> Cosmetic Inventory</h1>
+  <h1><img id="hdrIcon" alt="" style="width:30px;height:30px;border-radius:8px;object-fit:cover;vertical-align:-9px;margin-right:6px"> Skincare Shelves</h1>
   <div class="sub">Track expiry · sort by date · US &amp; JP brands</div>
 </header>
 
@@ -208,6 +208,11 @@
         <label>Skincare type</label>
         <select id="fType"></select>
       </div>
+    </div>
+    <div class="field">
+      <label>📍 Location / shelf</label>
+      <input id="fLocation" placeholder="e.g. Top shelf, Bathroom drawer, Box 1" list="locList" autocomplete="off">
+      <datalist id="locList"></datalist>
     </div>
 
     <!-- 2 · EXPIRY -->
@@ -398,14 +403,15 @@ function daysLeft(dateStr){
   const ms=new Date(toFullDate(dateStr)+"T00:00:00")-new Date(new Date().toDateString());
   return Math.round(ms/86400000);
 }
+const SOON_DAYS=180; // "expiring soon" = within 6 months
 function flagFor(it){
   if(it.status==="finished") return {c:"gray",label:"Finished"};
   const exp=effectiveExpiry(it); const d=daysLeft(exp);
   if(d===null) return {c:"gray",label:"No date"};
   if(d<0) return {c:"red",label:"Expired"};
   const mo=Math.round(d/30);
-  if(d<=30) return {c:"amber",label:d+"d left"};
-  return {c:"green",label:(mo>=2?mo+" mo left":d+"d left")};
+  if(d<=SOON_DAYS) return {c:"amber",label:(d>=45?mo+" mo left":d+"d left")};
+  return {c:"green",label:mo+" mo left"};
 }
 function fmtDate(s){
   if(!s) return "—";
@@ -428,7 +434,7 @@ function renderStats(){
   document.getElementById("stats").innerHTML=`
     <div class="stat"><div class="n">${ITEMS.filter(i=>i.status!=="finished").length}</div><div class="l">In inventory</div></div>
     <div class="stat red"><div class="n">${red}</div><div class="l">Expired</div></div>
-    <div class="stat amber"><div class="n">${amber}</div><div class="l">Soon (30d)</div></div>
+    <div class="stat amber"><div class="n">${amber}</div><div class="l">Soon (6mo)</div></div>
     <div class="stat green"><div class="n">${ok}</div><div class="l">Good</div></div>`;
 }
 function renderList(){
@@ -459,7 +465,7 @@ function renderList(){
       <div class="meta">
         <div class="brand">${it.brand||"&nbsp;"}</div>
         <div class="name">${it.name||"Untitled"}</div>
-        <div class="tags">${it.type?`<span class="tag">${it.type}</span>`:""}<span class="tag">${it.category}</span></div>
+        <div class="tags">${it.type?`<span class="tag">${it.type}</span>`:""}<span class="tag">${it.category}</span>${it.location?`<span class="tag">📍 ${it.location}</span>`:""}</div>
         <div class="exp ${f.c}">${exp?"Exp "+fmtDate(exp)+" · ":""}${f.label}</div>
       </div></div>`;
   }).join("");
@@ -497,6 +503,7 @@ function showDetail(id){
     ${it.photo1?`<img class="bigphoto" src="${it.photo1}">`:""}
     ${it.photo2?`<img class="bigphoto" src="${it.photo2}">`:""}
     ${row("Brand",it.brand)}
+    ${row("📍 Location",it.location)}
     ${row("Category",it.category)}
     ${row("Type",it.type)}
     <div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>
@@ -598,6 +605,10 @@ function renderBrandChips(){
     }
   });
 }
+function refreshLocations(){
+  const locs=[...new Set(ITEMS.map(i=>i.location).filter(Boolean))].sort();
+  document.getElementById("locList").innerHTML=locs.map(l=>`<option value="${l.replace(/"/g,'&quot;')}">`).join("");
+}
 function toggleTypeField(){
   document.getElementById("typeField").style.display=
     document.getElementById("fCat").value==="Skincare"?"block":"none";
@@ -608,6 +619,7 @@ function openModal(it){
   document.getElementById("sheetTitle").textContent=it?"Edit product":"Add product";
   const g=id=>document.getElementById(id);
   g("fBrand").value=it?.brand||""; g("fName").value=it?.name||"";
+  g("fLocation").value=it?.location||""; refreshLocations();
   g("fCat").value=it?.category||"Skincare"; g("fType").value=it?.type||"Serum";
   g("fExpiry").value=(it?.expiry||"").slice(0,7); g("fStatus").value=it?.status||"sealed";
   g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
@@ -654,6 +666,7 @@ async function save(){
   const it={
     id:editId||("it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)),
     brand:g("fBrand"), name, category:cat,
+    location:g("fLocation"),
     type:cat==="Skincare"?document.getElementById("fType").value:"",
     expiry:document.getElementById("fExpiry").value,
     status:document.getElementById("fStatus").value,
@@ -1177,8 +1190,8 @@ function exportJson(){
 }
 function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
 function exportCsv(){
-  const cols=["brand","name","category","type","expiry","purchase","opened","pao","status","lot","barcode","qty","notes"];
-  const head=["Brand","Name","Category","Type","Expiry","Purchased","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
+  const cols=["brand","name","category","type","location","expiry","purchase","opened","pao","status","lot","barcode","qty","notes"];
+  const head=["Brand","Name","Category","Type","Location","Expiry","Purchased","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
   const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it))).join(","));
   downloadFile("cosmetic-inventory-"+stamp()+".csv","text/csv",head.map(csvCell).join(",")+"\n"+rows.join("\n"));
   document.getElementById("menuStatus").textContent="✓ CSV downloaded ("+ITEMS.length+" items).";
@@ -1247,7 +1260,7 @@ function checkReminders(force){
   if(soon.length){
     const expired=soon.filter(x=>x.d<0).length, near=soon.length-expired;
     const parts=[]; if(expired)parts.push(expired+" expired"); if(near)parts.push(near+" expiring soon");
-    try{new Notification("💄 Cosmetic Inventory",{body:parts.join(" · ")+" (within "+aheadLabel(REM.days)+"). Open to review."});}catch(_){}
+    try{new Notification("🧴 Skincare Shelves",{body:parts.join(" · ")+" (within "+aheadLabel(REM.days)+"). Open to review."});}catch(_){}
     localStorage.setItem("remLast",today);
   }
 }
@@ -1311,7 +1324,7 @@ var HAMSTER="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDAgQD
 var il=document.getElementById("iconLink"); if(il)il.href=HAMSTER;
 var ai=document.getElementById("appleIcon"); if(ai)ai.href=HAMSTER;
 var hi=document.getElementById("hdrIcon"); if(hi)hi.src=HAMSTER;
-var mf={name:"Cosmetic Inventory",short_name:"Cosmetics",start_url:".",scope:".",display:"standalone",orientation:"portrait",background_color:"#faf6f5",theme_color:"#c96f8b",icons:[{src:HAMSTER,sizes:"512x512",type:"image/jpeg",purpose:"any"}]};
+var mf={name:"Skincare Shelves",short_name:"Shelves",start_url:".",scope:".",display:"standalone",orientation:"portrait",background_color:"#faf6f5",theme_color:"#c96f8b",icons:[{src:HAMSTER,sizes:"512x512",type:"image/jpeg",purpose:"any"}]};
 var ml=document.getElementById("manifestLink"); if(ml)ml.href="data:application/manifest+json,"+encodeURIComponent(JSON.stringify(mf));
 })();
 </script>
