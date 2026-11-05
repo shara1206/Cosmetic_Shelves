@@ -1,7 +1,7 @@
 /* Skincare Shelves - minimal service worker.
    Purpose: satisfy PWA installability and give the app an offline shell.
    Bump CACHE when you change the app so clients pick up the new version. */
-const CACHE = 'shelves-v5';
+const CACHE = 'shelves-v6';
 const SHELL = [
   './',
   './index.html',
@@ -33,14 +33,18 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  // version checks from the page must always hit the network
+  if (req.cache === 'no-store' || new URL(req.url).searchParams.has('check')) return;
 
   // Navigations: network first so edits show up, cache as offline fallback.
   if (req.mode === 'navigate') {
     e.respondWith(
-      fetch(req)
+      fetch(new Request(req, { cache: 'no-store' }))   // bypass the HTTP cache so a new deploy shows up immediately
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('./index.html', copy)).catch(() => {});
+          }
           return res;
         })
         .catch(() => caches.match('./index.html').then((r) => r || caches.match('./')))
