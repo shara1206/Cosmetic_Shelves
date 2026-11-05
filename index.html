@@ -129,6 +129,9 @@
   .quick{display:flex;gap:8px;margin:12px 0 4px}
   .quick .btn{padding:10px;font-size:13px}
   .rep{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-block}
+  .tbc{display:inline-block;white-space:nowrap;font-size:11px;font-weight:700;color:#8a5a00;background:#fff3cd;border:1px dashed #e0a13a;border-radius:20px;padding:1px 8px;margin-left:2px}
+  .tbcbar{display:flex;align-items:center;gap:8px;background:#fff8e6;border:1px dashed #e0a13a;border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:#7a5200;cursor:pointer}
+  .tbcbar.on{background:#e0a13a;color:#fff;border-style:solid}
   .rep.yes{background:#e3f4ea;color:var(--green)} .rep.no{background:#fbe6e6;color:var(--red)} .rep.maybe{background:#fbf0dc;color:#b07a1e}
 </style>
 </head>
@@ -146,6 +149,7 @@
     <button class="tabbtn" data-tab="finished">Finished<span class="c" id="cnt-finished">0</span></button>
   </div>
   <div class="stats" id="stats"></div>
+  <div class="tbcbar" id="tbcBar" style="display:none"></div>
   <div class="controls">
     <input class="search" id="search" type="search" placeholder="Search name, brand, shelf, notes…">
     <select class="filter" id="filter"><option value="">All types</option></select>
@@ -262,9 +266,10 @@
         </select>
       </div>
     </div>
+    <div class="hint" id="calcExp" style="margin:-6px 0 10px"></div>
     <details class="more" id="moreDates">
       <summary>No printed expiry? Compute it</summary>
-      <div class="hint" style="margin:2px 0 8px">Fill either pair — the app computes the expiry. Most cosmetics last ~3 yrs unopened.</div>
+      <div class="hint" style="margin:2px 0 8px">Fill either pair — the app computes the expiry. With no date at all, the app uses <b>date added + 3 yrs</b> and marks it <span class="tbc">待确认</span>.</div>
       <div class="row2">
         <div class="field">
           <label>Opened date</label>
@@ -295,7 +300,6 @@
           </select>
         </div>
       </div>
-      <div class="hint" id="calcExp" style="margin:-4px 0 8px;font-weight:600"></div>
     </details>
 
     <!-- 4 · MORE DETAILS -->
@@ -315,7 +319,7 @@
         <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a> <a href="https://checkfresh.com" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none;margin-right:10px">CheckFresh ↗</a></label>
         <input id="fLot" placeholder="type it, or read from photo">
       </div>
-      <div class="hint" style="margin:-2px 0 8px">A batch code isn't a date — each brand encodes the make date its own secret way, so no app can decode every brand. Tapping a decode link copies the lot code; pick the brand there, paste, then come back and enter the <b>Manufacture</b> month above — expiry is computed for you (3 yrs if you don't choose a shelf life).</div>
+      <div class="hint" style="margin:-2px 0 8px">A batch code isn't a date — each brand encodes the make date its own secret way, so no app can decode every brand. Tapping a decode link copies the lot code; pick the brand there, paste, then come back and enter the <b>Manufacture</b> month above — expiry is computed for you.</div>
       <div class="field">
         <label>Notes</label>
         <textarea id="fNotes" rows="2" placeholder="Shade, where bought, etc."></textarea>
@@ -396,7 +400,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.05b"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.05c"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -431,12 +435,27 @@ function toFullDate(s){
 }
 // return YYYY-MM. Pure month arithmetic (no Date/toISOString) so timezone & month-length can't shift the result.
 function addMonths(dateStr,n){const y=+dateStr.slice(0,4),m=+dateStr.slice(5,7)-1+parseInt(n,10);return Math.floor(m/12)+y+"-"+String(((m%12)+12)%12+1).padStart(2,"0");}
-function effectiveExpiry(it){
-  if(it.expiry) return it.expiry;                    // usually "YYYY-MM"
-  if(it.opened && it.pao) return addMonths(it.opened,it.pao);
-  if(it.mfg && it.shelf) return addMonths(it.mfg,it.shelf);
-  return null;
+/* when was the item added to the app (older items may lack `created`; the id holds the timestamp) */
+function addedISO(it){
+  let ms=it.created; if(!ms){const m=/^it_(\d{12,})/.exec(it.id||""); ms=m?+m[1]:null;}
+  if(!ms) return null; const d=new Date(ms);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 }
+/* {date, est, basis}. Known dates: printed expiry, opened+PAO, mfg+shelf life — the earliest wins.
+   Nothing known → ESTIMATE (marked "to confirm"): mfg + 3 yrs if mfg known, else date added to app + 3 yrs. */
+function expiryInfo(it){
+  const known=[];
+  if(it.expiry) known.push(it.expiry);
+  if(it.opened && it.pao) known.push(addMonths(it.opened,it.pao));
+  if(it.mfg && it.shelf) known.push(addMonths(it.mfg,it.shelf));
+  if(known.length) return {date:known.sort((a,b)=>toFullDate(a).localeCompare(toFullDate(b)))[0],est:false};
+  if(it.mfg) return {date:addMonths(it.mfg,36),est:true,basis:"made "+fmtDate(it.mfg)+" + 3 yrs"};
+  const add=addedISO(it);
+  if(add) return {date:addMonths(add,36),est:true,basis:"added to app "+fmtDate(add)+" + 3 yrs"};
+  return {date:null,est:false};
+}
+function effectiveExpiry(it){return expiryInfo(it).date;}
+const isEstimated=it=>statusOf(it)!=="finished"&&expiryInfo(it).est;
 function daysLeft(dateStr){
   if(!dateStr) return null;
   const ms=new Date(toFullDate(dateStr)+"T00:00:00")-new Date(new Date().toDateString());
@@ -510,8 +529,8 @@ function itemLine(it){
     const dur=fmtDur(monthsBetween(it.opened,it.finished));
     return `<div class="exp gray">${it.finished?"Finished "+fmtDate(it.finished):"Finished"}${dur?" · lasted "+dur:""}${it.repurchase?` <span class="rep ${esc(it.repurchase)}">${REP_LABEL[it.repurchase]||""}</span>`:""}</div>`;
   }
-  const exp=effectiveExpiry(it);
-  return `<div class="exp ${f.c}">${exp?"Exp "+fmtDate(exp)+" · ":""}${f.label}</div>`;
+  const x=expiryInfo(it), exp=x.date;
+  return `<div class="exp ${f.c}">${exp?"Exp "+(x.est?"~":"")+fmtDate(exp)+" · ":""}${f.label}${x.est?' <span class="tbc">待确认 To confirm</span>':""}</div>`;
 }
 function renderList(){
   const q=document.getElementById("search").value.toLowerCase();
@@ -519,6 +538,7 @@ function renderList(){
   const sort=document.getElementById("sort").value;
   let arr=ITEMS.filter(it=>{
     if(statusOf(it)!==TAB)return false;
+    if(ONLY_TBC&&!isEstimated(it))return false;
     const hay=[it.brand,it.name,it.location,it.notes,it.type,it.category].join(" ").toLowerCase();
     if(q&&!hay.includes(q))return false;
     if(ft&&it.type!==ft)return false;
@@ -569,19 +589,28 @@ function renderGallery(list,arr){
     const cells=items.map(it=>{
       const f=flagFor(it);
       const thumb=it.photo1?`<img src="${esc(it.photo1)}" loading="lazy">`:`<div class="gph">🧴</div>`;
-      return `<div class="gcell" data-id="${esc(it.id)}">${thumb}<span class="gflag" style="background:${FLAGCOLOR[f.c]||'#ccc'}"></span><span class="gname">${esc(it.name||"Untitled")}</span></div>`;
+      return `<div class="gcell" data-id="${esc(it.id)}"${isEstimated(it)?' style="outline:2px dashed #e0a13a;outline-offset:-2px"':""}>${thumb}<span class="gflag" style="background:${FLAGCOLOR[f.c]||'#ccc'}"></span><span class="gname">${esc(it.name||"Untitled")}</span></div>`;
     }).join("");
     return `<div class="gwrap"><div class="ghead">${esc(k)} <span class="gcount">${items.length}</span></div><div class="ggrid">${cells}</div></div>`;
   }).join("");
   list.querySelectorAll(".gcell").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
 }
-function refresh(){renderTabs();renderStats();renderList();}
-function setTab(t){TAB=t;try{localStorage.setItem("shelfTab",t);}catch(_){}refresh();window.scrollTo(0,0);}
+function refresh(){renderTabs();renderStats();renderTbcBar();renderList();}
+let ONLY_TBC=false;
+function renderTbcBar(){
+  const bar=document.getElementById("tbcBar");
+  const n=TAB==="finished"?0:ITEMS.filter(it=>statusOf(it)===TAB&&isEstimated(it)).length;
+  if(!n){ONLY_TBC=false;bar.style.display="none";return;}
+  bar.style.display="flex"; bar.classList.toggle("on",ONLY_TBC);
+  bar.innerHTML=ONLY_TBC?`✕ Showing ${n} estimated · tap to show all`
+    :`⚠️ <span><b>${n}</b> 个过期日是估算的（没有印刷日期，按 +3 年算）待确认 · tap to review</span>`;
+}
+function setTab(t){ONLY_TBC=false;TAB=t;try{localStorage.setItem("shelfTab",t);}catch(_){}refresh();window.scrollTo(0,0);}
 
 /* ---------- detail view ---------- */
 function showDetail(id){
   const it=ITEMS.find(x=>x.id===id); if(!it)return;
-  const f=flagFor(it); const exp=effectiveExpiry(it); const st=statusOf(it);
+  const f=flagFor(it); const xi=expiryInfo(it), exp=xi.date; const st=statusOf(it); const est=st!=="finished"&&xi.est;
   const row=(k,v)=>(v||v===0)?`<div class="detailrow"><span class="k">${k}</span><span>${esc(v)}</span></div>`:"";
   const lasted=fmtDur(monthsBetween(it.opened,it.finished));
   // one-tap status moves: unopened → in use → finished, plus "buy again" for empties
@@ -597,7 +626,9 @@ function showDetail(id){
     ${row("Category",it.category)}
     ${row("Type",it.type)}
     ${row("Status",STATUS_LABEL[st])}
-    ${st==="finished"?"":`<div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>`}
+    ${st==="finished"?"":`<div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?(est?"~":"")+fmtDate(exp):"—"} (${f.label})</span></div>`}
+    ${est?`<div class="tbcbar" style="cursor:default;display:block;margin-top:10px">⚠️ <b>待确认 · Estimated</b> — ${esc(xi.basis)}. Check the box/bottom for a printed date, or decode the lot code.
+      <div class="btns" style="margin-top:8px"><button class="btn ghost" id="qEditDates" style="padding:9px;font-size:13px">✏️ Enter real date</button><button class="btn primary" id="qConfirm" style="padding:9px;font-size:13px">✓ Keep ${esc(fmtDate(exp))}</button></div></div>`:""}
     ${row("Purchased",it.purchase?fmtDate(it.purchase):"")}
     ${row("Opened",it.opened?fmtDate(it.opened):"")}
     ${row("Finished",it.finished?fmtDate(it.finished):"")}
@@ -626,6 +657,8 @@ function showDetail(id){
     if(confirm("Delete this product?")){await delItem(id);ITEMS=await allItems();close();refresh();}
   };
   const q=id=>document.getElementById(id);
+  if(q("qConfirm"))q("qConfirm").onclick=()=>update({expiry:exp},"Expiry confirmed");
+  if(q("qEditDates"))q("qEditDates").onclick=()=>{close();openModal(it);document.getElementById("moreDates").open=true;setTimeout(()=>document.getElementById("fExpiry").scrollIntoView({block:"center"}),50);};
   if(q("qOpen"))q("qOpen").onclick=()=>update({status:"open",opened:it.opened||todayISO()},"Moved to In use");
   if(q("qReopen"))q("qReopen").onclick=()=>update({status:"open",finished:""},"Moved back to In use");
   if(q("qFinish"))q("qFinish").onclick=async()=>{
@@ -807,7 +840,7 @@ async function save(){
     pao:document.getElementById("fPao").value,
     purchase:document.getElementById("fPurchase").value,
     mfg:document.getElementById("fMfg").value,
-    shelf:document.getElementById("fShelf").value||(document.getElementById("fMfg").value?"36":""),
+    shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
     photo1, photo2, created:prev.created||Date.now()
   });
@@ -820,10 +853,12 @@ document.getElementById("cancelBtn").onclick=closeModal;
 document.getElementById("saveBtn").onclick=save;
 document.getElementById("search").oninput=renderList;
 document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.getElementById("tbcBar").onclick=()=>{ONLY_TBC=!ONLY_TBC;renderTbcBar();renderList();};
 document.getElementById("fStatus").onchange=()=>{
   toggleFinishedFields();
   const v=document.getElementById("fStatus").value;
   if(v==="finished"&&!document.getElementById("fFinished").value)document.getElementById("fFinished").value=todayISO();
+  if(v==="open"&&!document.getElementById("fOpened").value){document.getElementById("fOpened").value=todayISO();updateCalcExp();} // start using = opened today
 };
 document.getElementById("filter").onchange=renderList;
 document.getElementById("sort").onchange=renderList;
@@ -1370,12 +1405,12 @@ document.querySelectorAll('#moreDetails a[target=_blank]').forEach(a=>a.addEvent
 function updateCalcExp(){
   const g=id=>document.getElementById(id).value;
   const el=document.getElementById("calcExp");
-  const fake={expiry:g("fExpiry"),opened:g("fOpened"),pao:g("fPao"),mfg:g("fMfg"),shelf:g("fShelf")||(g("fMfg")?"36":"")};
-  if(fake.expiry){el.textContent=(fake.opened&&fake.pao)||(fake.mfg)?"Printed expiry above is used ("+fmtDate(fake.expiry)+"). Clear it to use the computed date.":"";return;}
-  const e=effectiveExpiry(fake);
-  el.textContent=e?"→ Expiry will be "+fmtDate(e)+((!g("fShelf")&&g("fMfg")&&!(fake.opened&&fake.pao))?" (assuming 3-yr shelf life)":""):"";
+  const prev=editId?(ITEMS.find(x=>x.id===editId)||{}):{};
+  const x=expiryInfo({id:prev.id,created:prev.created||Date.now(),expiry:g("fExpiry"),opened:g("fOpened"),pao:g("fPao"),mfg:g("fMfg"),shelf:g("fShelf")});
+  el.innerHTML=!x.date?"":x.est?"→ No date known: expiry set to <b>~"+fmtDate(x.date)+"</b> ("+esc(x.basis)+") and marked <span class=\"tbc\">待确认 To confirm</span>"
+    :"→ Expiry used: <b>"+fmtDate(x.date)+"</b>"+(g("fExpiry")&&((g("fOpened")&&g("fPao"))||(g("fMfg")&&g("fShelf")))?" (earliest of the printed and computed dates)":"");
 }
-["fExpiry","fOpened","fPao","fMfg","fShelf"].forEach(id=>document.getElementById(id).addEventListener("input",updateCalcExp));
+["fExpiry","fOpened","fPao","fMfg","fShelf","fStatus"].forEach(id=>document.getElementById(id).addEventListener("input",updateCalcExp));
 ["fPao","fShelf"].forEach(id=>document.getElementById(id).addEventListener("change",updateCalcExp));
 document.getElementById("scanCancel").onclick=stopScan;
 document.getElementById("scanModal").addEventListener("click",e=>{if(e.target.id==="scanModal")stopScan();});
@@ -1398,8 +1433,8 @@ function exportJson(){
 function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
 function exportCsv(){
   const cols=["brand","name","category","type","location","expiry","purchase","opened","finished","repurchase","pao","status","lot","barcode","qty","notes"];
-  const head=["Brand","Name","Category","Type","Location","Expiry","Purchased","Opened","Finished","BuyAgain","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
-  const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it))).join(","));
+  const head=["Brand","Name","Category","Type","Location","Expiry","Purchased","Opened","Finished","BuyAgain","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry","ExpiryNote"];
+  const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it)),csvCell(isEstimated(it)?"estimated":"")).join(","));
   downloadFile("cosmetic-inventory-"+stamp()+".csv","text/csv",head.map(csvCell).join(",")+"\n"+rows.join("\n"));
   document.getElementById("menuStatus").textContent="✓ CSV downloaded ("+ITEMS.length+" items).";
 }
