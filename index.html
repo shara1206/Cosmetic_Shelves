@@ -407,7 +407,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.05d"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.05e"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -1596,13 +1596,46 @@ window.addEventListener("load",()=>{setTimeout(()=>checkReminders(false),1500);}
 <script>
 /* PWA: register the service worker so Android installs this as a real app
    (WebAPK) instead of a Chrome bookmark shortcut. */
+var swReg = null;
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js').catch(function (e) {
-      console.warn('SW registration failed:', e);
-    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then(function (r) { swReg = r; })
+      .catch(function (e) { console.warn('SW registration failed:', e); });
   });
 }
+
+/* Auto-update: an installed app is often just resumed from memory and never reloads.
+   Each time it is opened / brought back, ask the server for the current version and
+   offer a one-tap update if it differs. */
+var updBarShown = false;
+function showUpdateBar(v) {
+  if (updBarShown) return; updBarShown = true;
+  var b = document.createElement('button');
+  b.textContent = '✨ New version ' + v + ' — tap to update';
+  b.style.cssText = 'position:fixed;left:12px;right:12px;top:10px;z-index:100;padding:13px;border:none;border-radius:12px;background:#2b2530;color:#fff;font-size:14px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.25);cursor:pointer';
+  b.onclick = function () {
+    b.textContent = 'Updating…';
+    var go = function () { location.reload(); };
+    if (swReg) swReg.update().then(go, go); else go();
+  };
+  document.body.appendChild(b);
+}
+function checkForUpdate() {
+  if (!navigator.onLine) return;
+  fetch('index.html?check=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.text() : ''; })
+    .then(function (t) {
+      var m = /APP_VERSION="([^"]+)"/.exec(t);
+      if (m && m[1] !== APP_VERSION) showUpdateBar(m[1]);
+    })
+    .catch(function () {});
+  if (swReg) swReg.update().catch(function () {});
+}
+window.addEventListener('load', function () { setTimeout(checkForUpdate, 2000); });
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') checkForUpdate();
+});
 </script>
 </body>
 </html>
