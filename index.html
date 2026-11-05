@@ -116,6 +116,13 @@
   details.more>summary::after{content:"▾";float:right;color:var(--muted)}
   details.more[open]>summary::after{content:"▴"}
   details.more[open]{padding-bottom:8px}
+  .sheethead{position:sticky;top:-18px;z-index:5;display:flex;align-items:center;gap:10px;background:var(--bg);margin:-18px -16px 10px;padding:14px 16px 10px}
+  .sheethead h2{flex:1;min-width:0;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .xbtn{flex:none;width:36px;height:36px;border-radius:50%;border:none;background:#efe6e9;color:var(--ink);font-size:18px;line-height:36px;padding:0;cursor:pointer}
+  .grab{width:40px;height:4px;border-radius:4px;background:#d9cdd2;margin:-6px auto 8px}
+  .actionbar{position:sticky;bottom:-30px;background:linear-gradient(180deg,rgba(250,246,245,0),var(--bg) 18%);padding:14px 0 30px;margin:10px 0 -30px;display:flex;gap:10px}
+  .actionbar .btn{padding:13px 10px}
+  .dellink{display:block;width:100%;margin:22px 0 6px;padding:12px;border:none;background:none;color:var(--red);font-size:14px;font-weight:600;cursor:pointer}
   .savebar{position:sticky;bottom:0;background:linear-gradient(180deg,rgba(250,246,245,0),var(--bg) 22%);padding-top:14px;margin-top:14px}
   .detailrow{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
   .detailrow .k{color:var(--muted)}
@@ -168,7 +175,7 @@
 <!-- Add / Edit modal -->
 <div class="modal" id="modal">
   <div class="sheet">
-    <h2 id="sheetTitle">Add product</h2>
+    <div class="sheethead"><h2 id="sheetTitle">Add product</h2><button class="xbtn" id="formX" aria-label="Close">✕</button></div>
 
     <!-- Import from a screenshot of another app -->
     <button type="button" class="btn ghost" id="importBtn" style="width:100%;margin:0 0 12px;font-size:13px;padding:10px">📥 Import from screenshot(s) — one or many products</button>
@@ -341,7 +348,7 @@
 <!-- Settings / backup modal -->
 <div class="modal" id="menuModal">
   <div class="sheet">
-    <h2>Backup &amp; data</h2>
+    <div class="sheethead"><h2>Backup &amp; data</h2><button class="xbtn" id="menuX" aria-label="Close">✕</button></div>
     <div class="hint" style="margin-bottom:14px">Your inventory is stored only on this device. Back it up regularly so you don't lose it.</div>
     <div class="btns" style="flex-direction:column">
       <button class="btn primary" id="expJson" style="margin-bottom:10px">⬇ Backup all (JSON, incl. photos)</button>
@@ -400,7 +407,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.05c"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.05d"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -616,9 +623,9 @@ function showDetail(id){
   // one-tap status moves: unopened → in use → finished, plus "buy again" for empties
   const quick=st==="sealed"?`<button class="btn primary" id="qOpen">✨ Start using</button>`
     :st==="open"?`<button class="btn primary" id="qFinish">🫙 Finished it</button>`
-    :`<button class="btn ghost" id="qAgain">🛒 Bought it again</button><button class="btn ghost" id="qReopen">↩ Back to in use</button>`;
+    :`<button class="btn ghost" id="qReopen">↩ In use</button><button class="btn primary" id="qAgain">🛒 Bought again</button>`;
   document.getElementById("detailSheet").innerHTML=`
-    <h2>${esc(it.name||"Untitled")}</h2>
+    <div class="sheethead"><h2>${esc(it.name||"Untitled")}</h2><button class="xbtn" id="dClose" aria-label="Close">✕</button></div>
     ${it.photo1?`<img class="bigphoto" src="${esc(it.photo1)}">`:""}
     ${it.photo2?`<img class="bigphoto" src="${esc(it.photo2)}">`:""}
     ${row("Brand",it.brand)}
@@ -641,12 +648,8 @@ function showDetail(id){
     ${row("Barcode",it.barcode)}
     ${row("Quantity",it.qty)}
     ${row("Notes",it.notes)}
-    <div class="quick">${quick}</div>
-    <div class="btns" style="margin-top:8px">
-      <button class="btn ghost" id="dClose">Close</button>
-      <button class="btn primary" id="dEdit">Edit</button>
-      <button class="btn danger" id="dDel">🗑</button>
-    </div>`;
+    <button class="dellink" id="dDel">🗑 Delete product</button>
+    <div class="actionbar"><button class="btn ghost" id="dEdit" style="flex:none;padding:13px 18px">✏️ Edit</button>${quick}</div>`;
   const close=()=>document.getElementById("detail").classList.remove("open");
   const update=async(patch,toast)=>{await putItem(Object.assign({},it,patch));ITEMS=await allItems();close();refresh();if(toast)showToast(toast);};
   document.getElementById("detail").classList.add("open");
@@ -654,7 +657,9 @@ function showDetail(id){
   document.getElementById("dClose").onclick=close;
   document.getElementById("dEdit").onclick=()=>{close();openModal(it);};
   document.getElementById("dDel").onclick=async()=>{
-    if(confirm("Delete this product?")){await delItem(id);ITEMS=await allItems();close();refresh();}
+    if(!confirm("Delete “"+(it.name||"this product")+"”?"))return;
+    await delItem(id);ITEMS=await allItems();close();refresh();
+    showToast("Deleted",{label:"Undo",fn:async()=>{await putItem(it);ITEMS=await allItems();refresh();showToast("Restored");}});
   };
   const q=id=>document.getElementById(id);
   if(q("qConfirm"))q("qConfirm").onclick=()=>update({expiry:exp},"Expiry confirmed");
@@ -677,12 +682,17 @@ function showDetail(id){
     showToast("Added a new unopened one — tap it in Unopened to set its expiry");
   };
 }
-function showToast(msg){
+function showToast(msg,action){
   let t=document.getElementById("toast");
   if(!t){t=document.createElement("div");t.id="toast";
-    t.style.cssText="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2b2530;color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;z-index:60;max-width:90vw;text-align:center;box-shadow:var(--shadow);transition:opacity .3s";
+    t.style.cssText="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2b2530;color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;z-index:60;max-width:90vw;text-align:center;box-shadow:var(--shadow);transition:opacity .3s;display:flex;gap:14px;align-items:center";
     document.body.appendChild(t);}
-  t.textContent=msg;t.style.opacity="1";clearTimeout(t._h);t._h=setTimeout(()=>{t.style.opacity="0";},2600);
+  t.innerHTML=""; const sp=document.createElement("span"); sp.textContent=msg; t.appendChild(sp);
+  if(action){const b=document.createElement("button");b.textContent=action.label;
+    b.style.cssText="background:none;border:none;color:#f5b8cb;font-weight:700;font-size:13px;padding:0;cursor:pointer";
+    b.onclick=()=>{t.style.opacity="0";t.style.pointerEvents="none";action.fn();};t.appendChild(b);}
+  t.style.opacity="1";t.style.pointerEvents="auto";clearTimeout(t._h);
+  t._h=setTimeout(()=>{t.style.opacity="0";t.style.pointerEvents="none";},action?5000:2600);
 }
 
 /* ---------- add/edit modal ---------- */
@@ -850,6 +860,25 @@ async function save(){
 /* ---------- wire up ---------- */
 document.getElementById("addBtn").onclick=()=>openModal(null);
 document.getElementById("cancelBtn").onclick=closeModal;
+document.getElementById("formX").onclick=closeModal;
+
+/* phone Back button / swipe-back closes the open sheet instead of leaving the app */
+(function(){
+  let entry=false, ignorePop=false, fromPop=false;
+  const top=()=>{const o=[...document.querySelectorAll(".modal.open")];return o[o.length-1];};
+  new MutationObserver(()=>{
+    const open=!!top();
+    if(open&&!entry){history.pushState({sheet:1},"");entry=true;}
+    else if(!open&&entry){entry=false; if(!fromPop){ignorePop=true;history.back();}}
+    fromPop=false;
+  }).observe(document.body,{subtree:true,attributes:true,attributeFilter:["class"]});
+  window.addEventListener("popstate",()=>{
+    if(ignorePop){ignorePop=false;return;}
+    const m=top(); if(!m)return;
+    entry=false; fromPop=true;
+    if(m.id==="scanModal")stopScan(); else m.classList.remove("open");
+  });
+})();
 document.getElementById("saveBtn").onclick=save;
 document.getElementById("search").oninput=renderList;
 document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
@@ -1460,6 +1489,7 @@ async function importJson(file){
   }catch(e){s.textContent="Restore failed: "+(e.message||e);}
 }
 document.getElementById("menuBtn").onclick=()=>{document.getElementById("menuStatus").textContent="";document.getElementById("menuModal").classList.add("open");};
+document.getElementById("menuX").onclick=()=>document.getElementById("menuModal").classList.remove("open");
 document.getElementById("menuClose").onclick=()=>document.getElementById("menuModal").classList.remove("open");
 document.getElementById("menuModal").addEventListener("click",e=>{if(e.target.id==="menuModal")e.currentTarget.classList.remove("open");});
 document.getElementById("expJson").onclick=exportJson;
