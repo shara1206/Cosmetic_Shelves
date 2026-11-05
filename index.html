@@ -175,7 +175,8 @@
     <div style="background:#fbeef2;border:1px solid #f0d7e0;border-radius:12px;padding:10px;margin-bottom:14px">
       <label style="display:block;font-size:12px;color:var(--pink-dark);font-weight:700;margin-bottom:6px">📷 Scan barcode to autofill</label>
       <div style="display:flex;gap:8px">
-        <input id="fBarcode" placeholder="Barcode (EAN/UPC)" style="flex:1;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff">
+        <input id="fBarcode" placeholder="Barcode (EAN/UPC)" inputmode="numeric" enterkeyhint="search" style="flex:1;min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#fff">
+        <button type="button" class="btn ghost" id="lookupBtn" style="flex:none;padding:11px 12px">Look up</button>
         <button type="button" class="btn primary" id="scanBtn" style="flex:none;padding:11px 16px">Scan</button>
       </div>
       <div class="hint" id="lookupStatus" style="margin-top:6px">Scan to look up name &amp; brand automatically. No match? Fill it in below.</div>
@@ -294,6 +295,7 @@
           </select>
         </div>
       </div>
+      <div class="hint" id="calcExp" style="margin:-4px 0 8px;font-weight:600"></div>
     </details>
 
     <!-- 4 · MORE DETAILS -->
@@ -310,10 +312,10 @@
         </div>
       </div>
       <div class="field">
-        <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a></label>
+        <label>Lot / batch no. <a id="decodeLot" href="https://checkcosmetic.net" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none">Decode date ↗</a> <a href="https://checkfresh.com" target="_blank" rel="noopener" style="float:right;font-size:11px;color:var(--pink-dark);font-weight:600;text-decoration:none;margin-right:10px">CheckFresh ↗</a></label>
         <input id="fLot" placeholder="type it, or read from photo">
       </div>
-      <div class="hint" style="margin:-2px 0 8px">A batch code isn't a date — it encodes the make date. Tap “Decode date”, then set Manufacture date + Shelf life above.</div>
+      <div class="hint" style="margin:-2px 0 8px">A batch code isn't a date — each brand encodes the make date its own secret way, so no app can decode every brand. Tapping a decode link copies the lot code; pick the brand there, paste, then come back and enter the <b>Manufacture</b> month above — expiry is computed for you (3 yrs if you don't choose a shelf life).</div>
       <div class="field">
         <label>Notes</label>
         <textarea id="fNotes" rows="2" placeholder="Shade, where bought, etc."></textarea>
@@ -394,7 +396,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.05"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.05b"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -753,7 +755,8 @@ function openModal(it){
   setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎");
   document.getElementById("brandChips").querySelectorAll(".chip").forEach(c=>
     c.classList.toggle("on",c.dataset.b===(it?.brand)));
-  toggleTypeField(); toggleFinishedFields();
+  toggleTypeField(); toggleFinishedFields(); updateCalcExp();
+  document.getElementById("lookupStatus").textContent="Scan or type a barcode to look up name & brand. No match? Fill it in below.";
   document.getElementById("moreDates").open=!!(it&&(it.opened||it.pao||it.mfg||it.shelf));
   document.getElementById("moreDetails").open=!!(it&&(it.purchase||it.lot||it.notes||(it.qty&&String(it.qty)!=="1")));
   document.getElementById("modal").querySelector(".sheet").scrollTop=0;
@@ -804,7 +807,7 @@ async function save(){
     pao:document.getElementById("fPao").value,
     purchase:document.getElementById("fPurchase").value,
     mfg:document.getElementById("fMfg").value,
-    shelf:document.getElementById("fShelf").value,
+    shelf:document.getElementById("fShelf").value||(document.getElementById("fMfg").value?"36":""),
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
     photo1, photo2, created:prev.created||Date.now()
   });
@@ -854,21 +857,39 @@ document.getElementById("appVer").textContent=APP_VERSION;
 
 /* ---- live barcode scanning (ZXing) ---- */
 let codeReader=null;
+/* GS1 check digit — rejects most misreads (a wrong digit = wrong product lookup) */
+function validGtin(code){
+  if(!/^\d{8}$|^\d{12,14}$/.test(code))return false;
+  const d=code.split("").map(Number), check=d.pop();
+  let sum=0; d.reverse().forEach((n,i)=>{sum+=n*(i%2===0?3:1);});
+  return (10-sum%10)%10===check;
+}
 async function startScan(){
   if(!window.ZXing){alert("Scanner needs internet to load. Connect and reopen.");return;}
   document.getElementById("scanModal").classList.add("open");
   document.getElementById("scanHint").textContent="Starting camera…";
   try{
-    codeReader=new ZXing.BrowserMultiFormatReader();
+    // only retail barcodes: stops the scanner grabbing QR / internal codes printed on the box
+    const hints=new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.UPC_E]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER,true);
+    codeReader=new ZXing.BrowserMultiFormatReader(hints);
     let deviceId;
     try{
       const devices=await codeReader.listVideoInputDevices();
       const back=devices.find(d=>/back|rear|environment/i.test(d.label));
       deviceId=(back||devices[devices.length-1]||{}).deviceId;
     }catch(_){}
-    document.getElementById("scanHint").textContent="Point the back camera at the barcode…";
+    document.getElementById("scanHint").textContent="Point the back camera at the barcode (hold steady, fill the frame)…";
+    let last="",same=0;
     codeReader.decodeFromVideoDevice(deviceId,"scanVideo",(result,err)=>{
-      if(result){const code=result.getText(); stopScan(); onBarcode(code);}
+      if(!result||!codeReader)return;
+      const code=result.getText();
+      const fmt=result.getBarcodeFormat&&result.getBarcodeFormat();
+      if(fmt!==ZXing.BarcodeFormat.UPC_E&&!validGtin(code))return;   // misread — keep scanning
+      same=(code===last)?same+1:1; last=code;
+      if(same<2){document.getElementById("scanHint").textContent="Reading "+code+"… hold still";return;} // confirm with a 2nd identical read
+      stopScan(); onBarcode(code);
     });
   }catch(e){document.getElementById("scanHint").textContent="Camera error: "+e.message;}
 }
@@ -882,8 +903,7 @@ function onBarcode(code){
   lookupBarcode(code);
 }
 
-/* ---- auto-lookup: your history → Open Beauty Facts → UPCitemdb ---- */
-function setIfEmpty(id,val){const el=document.getElementById(id);if(val&&!el.value){el.value=val; if(id==="fName")applyTypeGuess();}}
+/* ---- auto-lookup: your history → Open Beauty/Products/Food Facts → UPCitemdb ---- */
 /* guess the skincare type from the product name (user can still override) */
 function guessType(name){
   const t=(name||"").toLowerCase(); if(!t)return null;
@@ -911,44 +931,75 @@ function applyTypeGuess(){
   document.getElementById("fType").value=g;
 }
 function digits(x){return (x||"").replace(/\D/g,"");}
+/* the same product can be listed as 12-digit UPC or 13-digit EAN (leading 0) */
+function codeVariants(code){
+  const c=digits(code), v=[c];
+  if(c.length===12)v.push("0"+c);
+  if(c.length===13&&c[0]==="0")v.push(c.slice(1));
+  if(c.length===14&&c[0]==="0")v.push(c.slice(1));
+  return [...new Set(v)];
+}
+function setField(id,val){ // scan/look-up is an explicit request, so it overwrites
+  if(!val)return; const el=document.getElementById(id); el.value=val;
+  if(id==="fName"){typeTouched=false;applyTypeGuess();}
+  if(id==="fBrand")document.querySelectorAll("#brandChips .chip").forEach(c=>c.classList.toggle("on",c.dataset.b===val));
+}
+async function fetchJson(url,ms){
+  const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),ms||7000);
+  try{const r=await fetch(url,{signal:ctl.signal}); if(!r.ok)return null; return await r.json();}
+  catch(_){return null;} finally{clearTimeout(t);}
+}
 async function lookupBarcode(code){
   const s=document.getElementById("lookupStatus");
+  code=digits(code);
+  if(code.length<8){s.textContent="Enter or scan a full barcode (8–14 digits).";return;}
+  const warn=(code.length===12||code.length===13||code.length===8)&&!validGtin(code)?" ⚠️ This number fails the barcode check digit — probably mistyped/misread.":"";
+  const vars=codeVariants(code);
   // 1) your own past items — reliable & offline
-  const prev=ITEMS.find(it=>it.barcode&&digits(it.barcode)===digits(code));
+  const prev=ITEMS.find(it=>it.barcode&&codeVariants(it.barcode).some(v=>vars.includes(v)));
   if(prev){
-    setIfEmpty("fBrand",prev.brand); setIfEmpty("fName",prev.name);
+    setField("fBrand",prev.brand); setField("fName",prev.name);
     if(prev.category){document.getElementById("fCat").value=prev.category;toggleTypeField();}
-    if(prev.type)document.getElementById("fType").value=prev.type;
+    if(prev.type){document.getElementById("fType").value=prev.type;typeTouched=true;}
+    if(prev.location&&!document.getElementById("fLocation").value)document.getElementById("fLocation").value=prev.location;
+    if(prev.pao&&!document.getElementById("fPao").value)document.getElementById("fPao").value=prev.pao;
     s.innerHTML="✓ Recognized from your inventory: <b>"+esc(((prev.brand||"")+" "+(prev.name||"")).trim())+"</b>";
     return;
   }
   s.textContent="🔎 Looking up "+code+"…";
-  // 2) Open Beauty Facts
-  try{
-    const r=await fetch("https://world.openbeautyfacts.org/api/v2/product/"+encodeURIComponent(code)+".json");
-    const j=await r.json();
-    if(j&&j.status===1&&j.product&&(j.product.product_name||j.product.brands)){
-      const p=j.product, brand=(p.brands||"").split(",")[0].trim(), name=p.product_name||p.generic_name||"";
-      setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
-      s.innerHTML="✓ Found: <b>"+esc((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
-      return;
-    }
-  }catch(e){}
-  // 3) UPCitemdb (broader, US-focused) fallback
-  try{
-    const r=await fetch("https://api.upcitemdb.com/prod/trial/lookup?upc="+encodeURIComponent(code));
-    const j=await r.json();
+  // 2) Open Beauty / Products / Food Facts (free, community databases), all variants in parallel
+  const dbs=[["openbeautyfacts","Open Beauty Facts"],["openproductsfacts","Open Products Facts"],["openfoodfacts","Open Food Facts"]];
+  const reqs=[];
+  for(const [host,label] of dbs)for(const v of vars)
+    reqs.push(fetchJson("https://world."+host+".org/api/v2/product/"+v+".json?fields=product_name,product_name_en,product_name_ja,generic_name,brands").then(j=>({j,label})));
+  for(const {j,label} of await Promise.all(reqs)){
+    const p=j&&j.status===1&&j.product; if(!p)continue;
+    const name=p.product_name||p.product_name_en||p.product_name_ja||p.generic_name||"";
+    const brand=(p.brands||"").split(",")[0].trim();
+    if(!name&&!brand)continue;
+    setField("fBrand",brand); setField("fName",name);
+    s.innerHTML="✓ Found on "+label+": <b>"+esc((brand+" "+name).trim())+"</b> — community data, please check it's right."+warn;
+    return;
+  }
+  // 3) UPCitemdb (US-focused, 100 free lookups/day)
+  for(const v of vars){
+    const j=await fetchJson("https://api.upcitemdb.com/prod/trial/lookup?upc="+v);
     if(j&&j.items&&j.items.length){
       const it=j.items[0], brand=it.brand||"", name=it.title||"";
-      setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
-      s.innerHTML="✓ Found: <b>"+esc((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
+      setField("fBrand",brand); setField("fName",name);
+      s.innerHTML="✓ Found on UPCitemdb: <b>"+esc((brand+" "+name).trim()||"(unnamed)")+"</b> — please check it's right."+warn;
       return;
     }
-  }catch(e){}
-  s.innerHTML="No online match — very common for cosmetics, esp. Japanese brands. <a href=\"https://www.google.com/search?q="+encodeURIComponent(code+" cosmetic product")+"\" target=\"_blank\" rel=\"noopener\">Search this barcode ↗</a> to find the name, type it once, and next time you scan it the app fills it in automatically. Barcode saved.";
-  // fallback: try reading the name off the product photo, if we have one and no name yet
+  }
+  const isJP=/^4[59]/.test(code.length===13?code:"0"+code);
+  const q=encodeURIComponent(code);
+  const links=[`<a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Google</a>`];
+  if(isJP)links.push(`<a href="https://search.rakuten.co.jp/search/mall/${q}/" target="_blank" rel="noopener">楽天</a>`,`<a href="https://www.amazon.co.jp/s?k=${q}" target="_blank" rel="noopener">Amazon JP</a>`);
+  else links.push(`<a href="https://www.amazon.com/s?k=${q}" target="_blank" rel="noopener">Amazon</a>`);
+  s.innerHTML="No online match"+(isJP?" — Japanese (JAN) codes are rarely in free databases":"")+". Search "+links.join(" · ")+" ↗, type the name once, and next time this barcode fills in automatically."+warn;
   if(photo1 && !document.getElementById("fName").value) readProductPhoto(true);
 }
+function setIfEmpty(id,val){const el=document.getElementById(id);if(val&&!el.value){el.value=val; if(id==="fName")applyTypeGuess();}}
 
 /* ---- upscale + grayscale + contrast to boost OCR accuracy ---- */
 function preprocessForOCR(dataURL){
@@ -1220,6 +1271,7 @@ async function readPhoto2(){
     if(lot){document.getElementById("fLot").value=lot;document.getElementById("moreDetails").open=true;}
     if(exp)document.getElementById("fExpiry").value=exp.slice(0,7);
     if(mfg){document.getElementById("fMfg").value=mfg.slice(0,7);document.getElementById("moreDates").open=true;}
+    updateCalcExp();
     const bits=[];
     if(lot)bits.push("lot <b>"+lot+"</b>");
     if(exp)bits.push("expiry <b>"+fmtDate(exp)+"</b>");
@@ -1308,6 +1360,23 @@ function parseLot(raw){
 
 /* ---- wire Phase-2 buttons ---- */
 document.getElementById("scanBtn").onclick=startScan;
+document.getElementById("lookupBtn").onclick=()=>lookupBarcode(document.getElementById("fBarcode").value);
+document.getElementById("fBarcode").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();lookupBarcode(e.target.value);}};
+document.querySelectorAll('#moreDetails a[target=_blank]').forEach(a=>a.addEventListener("click",()=>{
+  const lot=document.getElementById("fLot").value.trim();
+  if(lot&&navigator.clipboard)navigator.clipboard.writeText(lot).then(()=>showToast("Lot "+lot+" copied — paste it on the site")).catch(()=>{});
+}));
+/* live preview of the expiry the app will use when no printed expiry is set */
+function updateCalcExp(){
+  const g=id=>document.getElementById(id).value;
+  const el=document.getElementById("calcExp");
+  const fake={expiry:g("fExpiry"),opened:g("fOpened"),pao:g("fPao"),mfg:g("fMfg"),shelf:g("fShelf")||(g("fMfg")?"36":"")};
+  if(fake.expiry){el.textContent=(fake.opened&&fake.pao)||(fake.mfg)?"Printed expiry above is used ("+fmtDate(fake.expiry)+"). Clear it to use the computed date.":"";return;}
+  const e=effectiveExpiry(fake);
+  el.textContent=e?"→ Expiry will be "+fmtDate(e)+((!g("fShelf")&&g("fMfg")&&!(fake.opened&&fake.pao))?" (assuming 3-yr shelf life)":""):"";
+}
+["fExpiry","fOpened","fPao","fMfg","fShelf"].forEach(id=>document.getElementById(id).addEventListener("input",updateCalcExp));
+["fPao","fShelf"].forEach(id=>document.getElementById(id).addEventListener("change",updateCalcExp));
 document.getElementById("scanCancel").onclick=stopScan;
 document.getElementById("scanModal").addEventListener("click",e=>{if(e.target.id==="scanModal")stopScan();});
 document.getElementById("ocrBtn").onclick=readPhoto2;
