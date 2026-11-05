@@ -120,6 +120,16 @@
   .detailrow{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
   .detailrow .k{color:var(--muted)}
   .bigphoto{width:100%;border-radius:12px;margin-bottom:10px}
+  /* shelf tabs: in use / unopened / finished */
+  .tabs{display:flex;gap:6px;background:var(--card);border-radius:14px;padding:5px;margin-bottom:14px;box-shadow:var(--shadow)}
+  .tabbtn{flex:1;border:none;background:none;border-radius:10px;padding:9px 4px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit}
+  .tabbtn .c{display:inline-block;min-width:20px;font-size:11px;background:#f3ebef;color:#7a6a74;border-radius:20px;padding:1px 6px;margin-left:4px}
+  .tabbtn.on{background:var(--pink);color:#fff}
+  .tabbtn.on .c{background:rgba(255,255,255,.25);color:#fff}
+  .quick{display:flex;gap:8px;margin:12px 0 4px}
+  .quick .btn{padding:10px;font-size:13px}
+  .rep{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-block}
+  .rep.yes{background:#e3f4ea;color:var(--green)} .rep.no{background:#fbe6e6;color:var(--red)} .rep.maybe{background:#fbf0dc;color:#b07a1e}
 </style>
 </head>
 <body>
@@ -130,9 +140,14 @@
 </header>
 
 <div class="wrap">
+  <div class="tabs" id="tabs">
+    <button class="tabbtn" data-tab="open">In use<span class="c" id="cnt-open">0</span></button>
+    <button class="tabbtn" data-tab="sealed">Unopened<span class="c" id="cnt-sealed">0</span></button>
+    <button class="tabbtn" data-tab="finished">Finished<span class="c" id="cnt-finished">0</span></button>
+  </div>
   <div class="stats" id="stats"></div>
   <div class="controls">
-    <input class="search" id="search" placeholder="Search name or brand…">
+    <input class="search" id="search" type="search" placeholder="Search name, brand, shelf, notes…">
     <select class="filter" id="filter"><option value="">All types</option></select>
     <select class="filter" id="sort">
       <option value="expiry">Expiry ↑</option>
@@ -225,9 +240,24 @@
       <div class="field">
         <label>Status</label>
         <select id="fStatus">
-          <option value="sealed">Sealed</option>
-          <option value="open">Open</option>
+          <option value="sealed">Unopened</option>
+          <option value="open">In use</option>
           <option value="finished">Finished</option>
+        </select>
+      </div>
+    </div>
+    <div class="row2" id="finishedFields" style="display:none">
+      <div class="field">
+        <label>Finished on</label>
+        <input type="date" id="fFinished">
+      </div>
+      <div class="field">
+        <label>Buy again?</label>
+        <select id="fRepurchase">
+          <option value="">—</option>
+          <option value="yes">👍 Yes</option>
+          <option value="maybe">🤔 Maybe</option>
+          <option value="no">👎 No</option>
         </select>
       </div>
     </div>
@@ -347,6 +377,7 @@
     <div class="btns" style="flex-direction:column;margin-top:20px">
       <button class="btn ghost" id="menuClose">Close</button>
     </div>
+    <div class="hint" style="text-align:center;margin-top:12px">App version <span id="appVer"></span></div>
   </div>
 </div>
 
@@ -363,6 +394,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
+const APP_VERSION="2026.11.05"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -370,6 +402,10 @@ const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer 
 const BRANDS_US = ["CeraVe","The Ordinary","Fenty Beauty","e.l.f.","Glossier","Estée Lauder","La Mer","Lancôme",
   "Clinique","Rare Beauty","Drunk Elephant"];
 const BRANDS_JP = ["Shiseido","SK-II","Clé de Peau Beauté","Albion","Tatcha","Shiro","Hada Labo","Canmake","Kosé","DHC","Kanebo","Fancl","Cezanne","Biore"];
+
+/* escape user/OCR/imported text before putting it into innerHTML */
+function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function todayISO(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
 
 /* ---------- tiny IndexedDB wrapper ---------- */
 let db;
@@ -391,7 +427,8 @@ function toFullDate(s){
   if(/^\d{4}-\d{2}$/.test(s)){const y=+s.slice(0,4),m=+s.slice(5,7);return s+"-"+String(new Date(y,m,0).getDate()).padStart(2,"0");}
   return s;
 }
-function addMonths(dateStr,n){const f=toFullDate(dateStr);const d=new Date(f+"T00:00:00");d.setMonth(d.getMonth()+parseInt(n));return d.toISOString().slice(0,7);} // return YYYY-MM
+// return YYYY-MM. Pure month arithmetic (no Date/toISOString) so timezone & month-length can't shift the result.
+function addMonths(dateStr,n){const y=+dateStr.slice(0,4),m=+dateStr.slice(5,7)-1+parseInt(n,10);return Math.floor(m/12)+y+"-"+String(((m%12)+12)%12+1).padStart(2,"0");}
 function effectiveExpiry(it){
   if(it.expiry) return it.expiry;                    // usually "YYYY-MM"
   if(it.opened && it.pao) return addMonths(it.opened,it.pao);
@@ -423,26 +460,64 @@ function fmtDate(s){
 let ITEMS=[]; let editId=null;
 let photo1=null, photo2=null;
 let viewMode=localStorage.getItem("viewMode")||"list";
+let TAB=localStorage.getItem("shelfTab")||"open";      // open = in use, sealed = unopened, finished = used up
+const statusOf=it=>(it.status==="open"||it.status==="finished")?it.status:"sealed"; // old/blank status counts as unopened
+const STATUS_LABEL={sealed:"Unopened",open:"In use",finished:"Finished"};
+const REP_LABEL={yes:"👍 Buy again",maybe:"🤔 Maybe",no:"👎 Won't rebuy"};
+function monthsBetween(a,b){if(!a||!b)return null;const ms=new Date(b+"T00:00:00")-new Date(a+"T00:00:00");return ms<0?null:ms/86400000/30.44;}
+function fmtDur(mo){if(mo==null)return "";if(mo<1)return Math.max(1,Math.round(mo*30.44))+" days";return (Math.round(mo*10)/10)+" mo";}
 let typeTouched=false;
 const FLAGCOLOR={red:"#e05656",amber:"#e0a13a",green:"#3fa66a",gray:"#c9bcc4"};
 
 /* ---------- rendering ---------- */
+function renderTabs(){
+  const n={sealed:0,open:0,finished:0}; ITEMS.forEach(it=>n[statusOf(it)]++);
+  for(const k in n) document.getElementById("cnt-"+k).textContent=n[k];
+  document.querySelectorAll(".tabbtn").forEach(b=>b.classList.toggle("on",b.dataset.tab===TAB));
+  document.querySelector('#sort option[value="expiry"]').textContent=TAB==="finished"?"Recently finished":"Expiry ↑";
+}
 function renderStats(){
+  const el=document.getElementById("stats");
+  const arr=ITEMS.filter(it=>statusOf(it)===TAB);
+  if(TAB==="finished"){
+    const yr=String(new Date().getFullYear());
+    const thisYear=arr.filter(it=>(it.finished||"").startsWith(yr)).length;
+    const lens=arr.map(it=>monthsBetween(it.opened,it.finished)).filter(x=>x!=null);
+    const avg=lens.length?fmtDur(lens.reduce((a,b)=>a+b,0)/lens.length):"—";
+    const again=arr.filter(it=>it.repurchase==="yes").length;
+    el.innerHTML=`
+      <div class="stat"><div class="n">${arr.length}</div><div class="l">Finished</div></div>
+      <div class="stat"><div class="n">${thisYear}</div><div class="l">This year</div></div>
+      <div class="stat"><div class="n" style="font-size:17px;line-height:26px">${avg}</div><div class="l">Avg. lasted</div></div>
+      <div class="stat green"><div class="n">${again}</div><div class="l">Buy again</div></div>`;
+    return;
+  }
   let red=0,amber=0,ok=0;
-  ITEMS.forEach(it=>{if(it.status==="finished")return;const f=flagFor(it);
+  arr.forEach(it=>{const f=flagFor(it);
     if(f.c==="red")red++;else if(f.c==="amber")amber++;else if(f.c==="green")ok++;});
-  document.getElementById("stats").innerHTML=`
-    <div class="stat"><div class="n">${ITEMS.filter(i=>i.status!=="finished").length}</div><div class="l">In inventory</div></div>
+  el.innerHTML=`
+    <div class="stat"><div class="n">${arr.length}</div><div class="l">${TAB==="open"?"In use":"Unopened"}</div></div>
     <div class="stat red"><div class="n">${red}</div><div class="l">Expired</div></div>
     <div class="stat amber"><div class="n">${amber}</div><div class="l">Soon (6mo)</div></div>
     <div class="stat green"><div class="n">${ok}</div><div class="l">Good</div></div>`;
+}
+/* label shown under each item: expiry for active items, finished date / lifespan for empties */
+function itemLine(it){
+  const f=flagFor(it);
+  if(statusOf(it)==="finished"){
+    const dur=fmtDur(monthsBetween(it.opened,it.finished));
+    return `<div class="exp gray">${it.finished?"Finished "+fmtDate(it.finished):"Finished"}${dur?" · lasted "+dur:""}${it.repurchase?` <span class="rep ${esc(it.repurchase)}">${REP_LABEL[it.repurchase]||""}</span>`:""}</div>`;
+  }
+  const exp=effectiveExpiry(it);
+  return `<div class="exp ${f.c}">${exp?"Exp "+fmtDate(exp)+" · ":""}${f.label}</div>`;
 }
 function renderList(){
   const q=document.getElementById("search").value.toLowerCase();
   const ft=document.getElementById("filter").value;
   const sort=document.getElementById("sort").value;
   let arr=ITEMS.filter(it=>{
-    const hay=((it.brand||"")+" "+(it.name||"")).toLowerCase();
+    if(statusOf(it)!==TAB)return false;
+    const hay=[it.brand,it.name,it.location,it.notes,it.type,it.category].join(" ").toLowerCase();
     if(q&&!hay.includes(q))return false;
     if(ft&&it.type!==ft)return false;
     return true;
@@ -450,23 +525,30 @@ function renderList(){
   arr.sort((a,b)=>{
     if(sort==="name")return (a.name||"").localeCompare(b.name||"");
     if(sort==="brand")return (a.brand||"").localeCompare(b.brand||"");
+    if(TAB==="finished")return (b.finished||"").localeCompare(a.finished||""); // newest empties first
     const ea=effectiveExpiry(a),eb=effectiveExpiry(b);
     if(!ea)return 1; if(!eb)return -1; return (toFullDate(ea)).localeCompare(toFullDate(eb));
   });
   const list=document.getElementById("list");
-  if(!arr.length){list.innerHTML=`<div class="empty"><div class="big">🧴</div>
-    ${ITEMS.length?"No matches.":"No products yet.<br>Tap + to add your first one."}</div>`;return;}
+  if(!arr.length){
+    const inTab=ITEMS.some(it=>statusOf(it)===TAB);
+    const msg=!ITEMS.length?"No products yet.<br>Tap + to add your first one."
+      :inTab?"No matches."
+      :TAB==="finished"?"Nothing finished yet.<br>Open a product and tap “Finished” when you use it up."
+      :TAB==="open"?"Nothing in use.<br>Open an unopened product and tap “Start using”."
+      :"No unopened products.";
+    list.innerHTML=`<div class="empty"><div class="big">${TAB==="finished"?"🫙":"🧴"}</div>${msg}</div>`;return;}
   if(viewMode==="gallery"){ renderGallery(list,arr); return; }
   list.innerHTML=arr.map(it=>{
-    const f=flagFor(it); const exp=effectiveExpiry(it);
-    const thumb=it.photo1?`<img class="thumb" src="${it.photo1}">`:`<div class="thumb ph">🧴</div>`;
-    return `<div class="item" data-id="${it.id}">
+    const f=flagFor(it);
+    const thumb=it.photo1?`<img class="thumb" src="${esc(it.photo1)}" loading="lazy">`:`<div class="thumb ph">🧴</div>`;
+    return `<div class="item" data-id="${esc(it.id)}">
       <div class="flag ${f.c}"></div>${thumb}
       <div class="meta">
-        <div class="brand">${it.brand||"&nbsp;"}</div>
-        <div class="name">${it.name||"Untitled"}</div>
-        <div class="tags">${it.type?`<span class="tag">${it.type}</span>`:""}<span class="tag">${it.category}</span>${it.location?`<span class="tag">📍 ${it.location}</span>`:""}</div>
-        <div class="exp ${f.c}">${exp?"Exp "+fmtDate(exp)+" · ":""}${f.label}</div>
+        <div class="brand">${it.brand?esc(it.brand):"&nbsp;"}</div>
+        <div class="name">${esc(it.name||"Untitled")}</div>
+        <div class="tags">${it.type?`<span class="tag">${esc(it.type)}</span>`:""}<span class="tag">${esc(it.category)}</span>${it.location?`<span class="tag">📍 ${esc(it.location)}</span>`:""}</div>
+        ${itemLine(it)}
       </div></div>`;
   }).join("");
   list.querySelectorAll(".item").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
@@ -484,50 +566,88 @@ function renderGallery(list,arr){
     const items=groups[k];
     const cells=items.map(it=>{
       const f=flagFor(it);
-      const thumb=it.photo1?`<img src="${it.photo1}">`:`<div class="gph">🧴</div>`;
-      return `<div class="gcell" data-id="${it.id}">${thumb}<span class="gflag" style="background:${FLAGCOLOR[f.c]||'#ccc'}"></span><span class="gname">${it.name||"Untitled"}</span></div>`;
+      const thumb=it.photo1?`<img src="${esc(it.photo1)}" loading="lazy">`:`<div class="gph">🧴</div>`;
+      return `<div class="gcell" data-id="${esc(it.id)}">${thumb}<span class="gflag" style="background:${FLAGCOLOR[f.c]||'#ccc'}"></span><span class="gname">${esc(it.name||"Untitled")}</span></div>`;
     }).join("");
-    return `<div class="gwrap"><div class="ghead">${k} <span class="gcount">${items.length}</span></div><div class="ggrid">${cells}</div></div>`;
+    return `<div class="gwrap"><div class="ghead">${esc(k)} <span class="gcount">${items.length}</span></div><div class="ggrid">${cells}</div></div>`;
   }).join("");
   list.querySelectorAll(".gcell").forEach(el=>el.onclick=()=>showDetail(el.dataset.id));
 }
-function refresh(){renderStats();renderList();}
+function refresh(){renderTabs();renderStats();renderList();}
+function setTab(t){TAB=t;try{localStorage.setItem("shelfTab",t);}catch(_){}refresh();window.scrollTo(0,0);}
 
 /* ---------- detail view ---------- */
 function showDetail(id){
   const it=ITEMS.find(x=>x.id===id); if(!it)return;
-  const f=flagFor(it); const exp=effectiveExpiry(it);
-  const row=(k,v)=>v?`<div class="detailrow"><span class="k">${k}</span><span>${v}</span></div>`:"";
+  const f=flagFor(it); const exp=effectiveExpiry(it); const st=statusOf(it);
+  const row=(k,v)=>(v||v===0)?`<div class="detailrow"><span class="k">${k}</span><span>${esc(v)}</span></div>`:"";
+  const lasted=fmtDur(monthsBetween(it.opened,it.finished));
+  // one-tap status moves: unopened → in use → finished, plus "buy again" for empties
+  const quick=st==="sealed"?`<button class="btn primary" id="qOpen">✨ Start using</button>`
+    :st==="open"?`<button class="btn primary" id="qFinish">🫙 Finished it</button>`
+    :`<button class="btn ghost" id="qAgain">🛒 Bought it again</button><button class="btn ghost" id="qReopen">↩ Back to in use</button>`;
   document.getElementById("detailSheet").innerHTML=`
-    <h2>${it.name||"Untitled"}</h2>
-    ${it.photo1?`<img class="bigphoto" src="${it.photo1}">`:""}
-    ${it.photo2?`<img class="bigphoto" src="${it.photo2}">`:""}
+    <h2>${esc(it.name||"Untitled")}</h2>
+    ${it.photo1?`<img class="bigphoto" src="${esc(it.photo1)}">`:""}
+    ${it.photo2?`<img class="bigphoto" src="${esc(it.photo2)}">`:""}
     ${row("Brand",it.brand)}
     ${row("📍 Location",it.location)}
     ${row("Category",it.category)}
     ${row("Type",it.type)}
-    <div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>
+    ${row("Status",STATUS_LABEL[st])}
+    ${st==="finished"?"":`<div class="detailrow"><span class="k">Expiry</span><span class="exp ${f.c}">${exp?fmtDate(exp):"—"} (${f.label})</span></div>`}
     ${row("Purchased",it.purchase?fmtDate(it.purchase):"")}
     ${row("Opened",it.opened?fmtDate(it.opened):"")}
+    ${row("Finished",it.finished?fmtDate(it.finished):"")}
+    ${row("Lasted",lasted)}
+    ${row("Buy again?",REP_LABEL[it.repurchase]||"")}
     ${row("PAO",it.pao?it.pao+" months":"")}
     ${row("Manufactured",it.mfg?fmtDate(it.mfg):"")}
     ${row("Shelf life",it.shelf?(it.shelf/12)+" yr unopened":"")}
-    ${row("Status",it.status)}
     ${row("Lot / batch",it.lot)}
     ${row("Barcode",it.barcode)}
     ${row("Quantity",it.qty)}
     ${row("Notes",it.notes)}
-    <div class="btns" style="margin-top:16px">
+    <div class="quick">${quick}</div>
+    <div class="btns" style="margin-top:8px">
       <button class="btn ghost" id="dClose">Close</button>
       <button class="btn primary" id="dEdit">Edit</button>
       <button class="btn danger" id="dDel">🗑</button>
     </div>`;
+  const close=()=>document.getElementById("detail").classList.remove("open");
+  const update=async(patch,toast)=>{await putItem(Object.assign({},it,patch));ITEMS=await allItems();close();refresh();if(toast)showToast(toast);};
   document.getElementById("detail").classList.add("open");
-  document.getElementById("dClose").onclick=()=>document.getElementById("detail").classList.remove("open");
-  document.getElementById("dEdit").onclick=()=>{document.getElementById("detail").classList.remove("open");openModal(it);};
+  document.getElementById("detailSheet").scrollTop=0;
+  document.getElementById("dClose").onclick=close;
+  document.getElementById("dEdit").onclick=()=>{close();openModal(it);};
   document.getElementById("dDel").onclick=async()=>{
-    if(confirm("Delete this product?")){await delItem(id);ITEMS=await allItems();document.getElementById("detail").classList.remove("open");refresh();}
+    if(confirm("Delete this product?")){await delItem(id);ITEMS=await allItems();close();refresh();}
   };
+  const q=id=>document.getElementById(id);
+  if(q("qOpen"))q("qOpen").onclick=()=>update({status:"open",opened:it.opened||todayISO()},"Moved to In use");
+  if(q("qReopen"))q("qReopen").onclick=()=>update({status:"open",finished:""},"Moved back to In use");
+  if(q("qFinish"))q("qFinish").onclick=async()=>{
+    const r=prompt("Finished! Would you buy it again?\nType y = yes, m = maybe, n = no (or leave blank)","");
+    if(r===null)return;
+    const k=(r.trim()[0]||"").toLowerCase();
+    await update({status:"finished",finished:todayISO(),repurchase:{y:"yes",m:"maybe",n:"no"}[k]||""},"Moved to Finished 🫙");
+  };
+  if(q("qAgain"))q("qAgain").onclick=async()=>{
+    // new unopened copy that keeps name/brand/type/location/barcode, fresh dates
+    const copy={id:"it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
+      brand:it.brand,name:it.name,category:it.category,type:it.type,location:it.location,barcode:it.barcode,
+      pao:it.pao,shelf:it.shelf,status:"sealed",expiry:"",opened:"",mfg:"",lot:"",finished:"",repurchase:"",
+      purchase:todayISO(),qty:1,notes:"",photo1:it.photo1,photo2:null,created:Date.now()};
+    await putItem(copy);ITEMS=await allItems();close();refresh();
+    showToast("Added a new unopened one — tap it in Unopened to set its expiry");
+  };
+}
+function showToast(msg){
+  let t=document.getElementById("toast");
+  if(!t){t=document.createElement("div");t.id="toast";
+    t.style.cssText="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2b2530;color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;z-index:60;max-width:90vw;text-align:center;box-shadow:var(--shadow);transition:opacity .3s";
+    document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity="1";clearTimeout(t._h);t._h=setTimeout(()=>{t.style.opacity="0";},2600);
 }
 
 /* ---------- add/edit modal ---------- */
@@ -563,9 +683,9 @@ function renderBrandChips(){
     const hid=HIDDEN_BRANDS.includes(b);
     if(!manageMode&&hid)return "";
     const mark=manageMode?(hid?"＋ ":"✕ "):"";
-    return `<span class="chip${cur===b?" on":""}${hid?" hidden-chip":""}" data-b="${b}">${mark}${b}</span>`;
+    return `<span class="chip${cur===b?" on":""}${hid?" hidden-chip":""}" data-b="${esc(b)}">${mark}${esc(b)}</span>`;
   };
-  const customChip=b=>`<span class="chip${cur===b?" on":""}" data-b="${b}" data-custom="1">${manageMode?"🗑 ":""}${b}</span>`;
+  const customChip=b=>`<span class="chip${cur===b?" on":""}" data-b="${esc(b)}" data-custom="1">${manageMode?"🗑 ":""}${esc(b)}</span>`;
   const grp=(label,arr,fn)=>{const h=arr.map(fn).join("");return h.replace(/\s/g,"")?grpLabel(label)+h:"";};
 
   let html="";
@@ -607,7 +727,7 @@ function renderBrandChips(){
 }
 function refreshLocations(){
   const locs=[...new Set(ITEMS.map(i=>i.location).filter(Boolean))].sort();
-  document.getElementById("locList").innerHTML=locs.map(l=>`<option value="${l.replace(/"/g,'&quot;')}">`).join("");
+  document.getElementById("locList").innerHTML=locs.map(l=>`<option value="${esc(l)}">`).join("");
 }
 function toggleTypeField(){
   document.getElementById("typeField").style.display=
@@ -621,8 +741,10 @@ function openModal(it){
   g("fBrand").value=it?.brand||""; g("fName").value=it?.name||"";
   g("fLocation").value=it?.location||""; refreshLocations();
   g("fCat").value=it?.category||"Skincare"; g("fType").value=it?.type||"Serum";
-  g("fExpiry").value=(it?.expiry||"").slice(0,7); g("fStatus").value=it?.status||"sealed";
-  g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
+  g("fExpiry").value=(it?.expiry||"").slice(0,7); g("fStatus").value=it?statusOf(it):TAB;
+  g("fFinished").value=it?.finished||(!it&&TAB==="finished"?todayISO():""); g("fRepurchase").value=it?.repurchase||"";
+  if(!it&&TAB==="open")g("fOpened").value=todayISO();
+  if(it||TAB!=="open")g("fOpened").value=it?.opened||""; g("fPao").value=it?.pao||"";
   g("fMfg").value=(it?.mfg||"").slice(0,7); g("fShelf").value=it?.shelf||"";
   g("fPurchase").value=it?.purchase||"";
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
@@ -631,11 +753,14 @@ function openModal(it){
   setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎");
   document.getElementById("brandChips").querySelectorAll(".chip").forEach(c=>
     c.classList.toggle("on",c.dataset.b===(it?.brand)));
-  toggleTypeField();
+  toggleTypeField(); toggleFinishedFields();
   document.getElementById("moreDates").open=!!(it&&(it.opened||it.pao||it.mfg||it.shelf));
   document.getElementById("moreDetails").open=!!(it&&(it.purchase||it.lot||it.notes||(it.qty&&String(it.qty)!=="1")));
   document.getElementById("modal").querySelector(".sheet").scrollTop=0;
   document.getElementById("modal").classList.add("open");
+}
+function toggleFinishedFields(){
+  document.getElementById("finishedFields").style.display=document.getElementById("fStatus").value==="finished"?"flex":"none";
 }
 function setPhotoBtn(id,data,ic){
   const b=document.getElementById(id);
@@ -663,21 +788,26 @@ async function save(){
   const name=g("fName");
   if(!name){alert("Please enter a product name.");return;}
   const cat=document.getElementById("fCat").value;
-  const it={
+  const prev=editId?(ITEMS.find(x=>x.id===editId)||{}):{};
+  const status=document.getElementById("fStatus").value;
+  let opened=document.getElementById("fOpened").value;
+  if(status==="open"&&!opened&&prev.status!=="open")opened=todayISO(); // just started using it
+  const it=Object.assign({},prev,{
     id:editId||("it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6)),
     brand:g("fBrand"), name, category:cat,
     location:g("fLocation"),
     type:cat==="Skincare"?document.getElementById("fType").value:"",
     expiry:document.getElementById("fExpiry").value,
-    status:document.getElementById("fStatus").value,
-    opened:document.getElementById("fOpened").value,
+    status, opened,
+    finished:status==="finished"?(document.getElementById("fFinished").value||todayISO()):"",
+    repurchase:status==="finished"?document.getElementById("fRepurchase").value:"",
     pao:document.getElementById("fPao").value,
     purchase:document.getElementById("fPurchase").value,
     mfg:document.getElementById("fMfg").value,
     shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
-    photo1, photo2, created:editId?undefined:Date.now()
-  };
+    photo1, photo2, created:prev.created||Date.now()
+  });
   await putItem(it); ITEMS=await allItems(); closeModal(); refresh();
 }
 
@@ -686,6 +816,12 @@ document.getElementById("addBtn").onclick=()=>openModal(null);
 document.getElementById("cancelBtn").onclick=closeModal;
 document.getElementById("saveBtn").onclick=save;
 document.getElementById("search").oninput=renderList;
+document.querySelectorAll(".tabbtn").forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.getElementById("fStatus").onchange=()=>{
+  toggleFinishedFields();
+  const v=document.getElementById("fStatus").value;
+  if(v==="finished"&&!document.getElementById("fFinished").value)document.getElementById("fFinished").value=todayISO();
+};
 document.getElementById("filter").onchange=renderList;
 document.getElementById("sort").onchange=renderList;
 function updateViewToggle(){document.getElementById("viewToggle").textContent=viewMode==="gallery"?"☰ List":"▦ Gallery";}
@@ -705,9 +841,11 @@ document.getElementById("ocrNameBtn").onclick=()=>readProductPhoto(false);
 document.getElementById("fName").oninput=()=>applyTypeGuess();
 document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
 document.getElementById("importFile").onchange=e=>{importScreenshots(e.target.files);e.target.value="";};
+document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".modal.open").forEach(m=>{if(m.id==="scanModal")stopScan();else m.classList.remove("open");});});
 [document.getElementById("modal"),document.getElementById("detail")].forEach(m=>
   m.onclick=e=>{if(e.target===m)m.classList.remove("open");});
 
+document.getElementById("appVer").textContent=APP_VERSION;
 (async function init(){
   await openDB(); buildSelects(); ITEMS=await allItems(); refresh();
 })();
@@ -781,7 +919,7 @@ async function lookupBarcode(code){
     setIfEmpty("fBrand",prev.brand); setIfEmpty("fName",prev.name);
     if(prev.category){document.getElementById("fCat").value=prev.category;toggleTypeField();}
     if(prev.type)document.getElementById("fType").value=prev.type;
-    s.innerHTML="✓ Recognized from your inventory: <b>"+((prev.brand||"")+" "+(prev.name||"")).trim()+"</b>";
+    s.innerHTML="✓ Recognized from your inventory: <b>"+esc(((prev.brand||"")+" "+(prev.name||"")).trim())+"</b>";
     return;
   }
   s.textContent="🔎 Looking up "+code+"…";
@@ -792,7 +930,7 @@ async function lookupBarcode(code){
     if(j&&j.status===1&&j.product&&(j.product.product_name||j.product.brands)){
       const p=j.product, brand=(p.brands||"").split(",")[0].trim(), name=p.product_name||p.generic_name||"";
       setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
-      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
+      s.innerHTML="✓ Found: <b>"+esc((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
       return;
     }
   }catch(e){}
@@ -803,7 +941,7 @@ async function lookupBarcode(code){
     if(j&&j.items&&j.items.length){
       const it=j.items[0], brand=it.brand||"", name=it.title||"";
       setIfEmpty("fBrand",brand); setIfEmpty("fName",name);
-      s.innerHTML="✓ Found: <b>"+((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
+      s.innerHTML="✓ Found: <b>"+esc((brand+" "+name).trim()||"(unnamed)")+"</b> — verify.";
       return;
     }
   }catch(e){}
@@ -883,7 +1021,7 @@ async function readProductPhoto(auto,tries){
     if(g&&(g.name||g.brand)){
       if(g.brand)setIfEmpty("fBrand",g.brand);
       if(g.name)setIfEmpty("fName",g.name);
-      s.innerHTML="✨ Gemini read "+(g.name?"name <b>"+g.name+"</b>":"")+((g.name&&g.brand)?" · ":"")+(g.brand?"brand <b>"+g.brand+"</b>":"")+" — verify.";
+      s.innerHTML="✨ Gemini read "+(g.name?"name <b>"+esc(g.name)+"</b>":"")+((g.name&&g.brand)?" · ":"")+(g.brand?"brand <b>"+esc(g.brand)+"</b>":"")+" — verify.";
       return;
     }
     // candidate lines: prefer taller text (bigger = product name); fall back to line length
@@ -907,10 +1045,10 @@ async function readProductPhoto(auto,tries){
     const name=(nameCand||lines[0]||{}).t||"";
     if(name)setIfEmpty("fName",name);
     if(name||brandHit){
-      s.innerHTML="Read "+(name?"name <b>"+name+"</b>":"")+((name&&brandHit)?" · ":"")+(brandHit?"brand <b>"+brandHit+"</b>":"")+" — please verify.";
+      s.innerHTML="Read "+(name?"name <b>"+esc(name)+"</b>":"")+((name&&brandHit)?" · ":"")+(brandHit?"brand <b>"+esc(brandHit)+"</b>":"")+" — please verify.";
     }else{
       const snip=(text||"").replace(/\s+/g," ").trim().slice(0,60);
-      s.innerHTML="Couldn't pick a name"+(snip?" (saw: “"+snip+"…”)":" — the photo was too blurry/small")+". Retake a closer, straight shot of the front label, or <a href=\"https://www.google.com/search?q="+encodeURIComponent(snip||"cosmetic product name")+"\" target=\"_blank\" rel=\"noopener\">search it ↗</a> and type it.";
+      s.innerHTML="Couldn't pick a name"+(snip?" (saw: “"+esc(snip)+"…”)":" — the photo was too blurry/small")+". Retake a closer, straight shot of the front label, or <a href=\"https://www.google.com/search?q="+encodeURIComponent(snip||"cosmetic product name")+"\" target=\"_blank\" rel=\"noopener\">search it ↗</a> and type it.";
     }
   }catch(e){s.textContent="Couldn't read the photo: "+(e.message||e);}
 }
@@ -1040,7 +1178,7 @@ async function saveImported(r){
     opened:/^\d{4}-\d{2}-\d{2}$/.test(r.opened||"")?r.opened:"",
     pao:(String(r.pao||"").match(/\d+/)||[])[0]||"", mfg:"", shelf:"",
     purchase:/^\d{4}-\d{2}-\d{2}$/.test(r.purchase||"")?r.purchase:"",
-    lot:"", qty:1, barcode:"", notes:r.notes||"", photo1:null, photo2:null, created:Date.now()
+    lot:"", qty:1, barcode:"", notes:r.notes||"", finished:"", repurchase:"", photo1:null, photo2:null, created:Date.now()
   };
   await putItem(it);
 }
@@ -1190,8 +1328,8 @@ function exportJson(){
 }
 function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
 function exportCsv(){
-  const cols=["brand","name","category","type","location","expiry","purchase","opened","pao","status","lot","barcode","qty","notes"];
-  const head=["Brand","Name","Category","Type","Location","Expiry","Purchased","Opened","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
+  const cols=["brand","name","category","type","location","expiry","purchase","opened","finished","repurchase","pao","status","lot","barcode","qty","notes"];
+  const head=["Brand","Name","Category","Type","Location","Expiry","Purchased","Opened","Finished","BuyAgain","PAO(months)","Status","Lot","Barcode","Qty","Notes","EffectiveExpiry"];
   const rows=ITEMS.map(it=>cols.map(c=>csvCell(it[c])).concat(csvCell(effectiveExpiry(it))).join(","));
   downloadFile("cosmetic-inventory-"+stamp()+".csv","text/csv",head.map(csvCell).join(",")+"\n"+rows.join("\n"));
   document.getElementById("menuStatus").textContent="✓ CSV downloaded ("+ITEMS.length+" items).";
@@ -1203,7 +1341,10 @@ async function importJson(file){
     const data=JSON.parse(text);
     const items=Array.isArray(data)?data:data.items;
     if(!Array.isArray(items))throw new Error("Not a valid backup file.");
-    const mode=confirm("OK = MERGE with current data.\nCancel = REPLACE everything with the backup.");
+    let mode=confirm("Restore "+items.length+" items.\n\nOK = MERGE with what's on this phone (recommended)\nCancel = more options");
+    if(!mode){
+      if(!confirm("REPLACE everything on this phone with the backup?\nYour current "+ITEMS.length+" items will be deleted.\n\nOK = replace · Cancel = abort")){s.textContent="Restore cancelled.";return;}
+    }
     if(!mode){ // replace
       const cur=await allItems();
       await Promise.all(cur.map(i=>delItem(i.id)));
@@ -1286,8 +1427,8 @@ async function cloudUp(){
     if(CLOUD.bin){url="https://api.jsonbin.io/v3/b/"+CLOUD.bin;method="PUT";}
     else{url="https://api.jsonbin.io/v3/b";method="POST";}
     const r=await fetch(url,{method,headers:{"Content-Type":"application/json","X-Master-Key":CLOUD.key,"X-Bin-Private":"true","X-Bin-Name":"cosmetic-inventory"},body:JSON.stringify(payload)});
-    const j=await r.json();
-    if(!r.ok)throw new Error(j.message||("HTTP "+r.status));
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error((j.message||("HTTP "+r.status))+(r.status===413||/size|large/i.test(j.message||"")?" — the backup is too big for JSONBin's free plan (photos take a lot of space). Use the JSON backup file instead.":""));
     if(!CLOUD.bin){CLOUD.bin=(j.metadata&&j.metadata.id)||"";document.getElementById("cloudBin").value=CLOUD.bin;localStorage.setItem("cloudBin",CLOUD.bin);}
     s.innerHTML="✓ Synced up ("+ITEMS.length+" items). Bin saved — use the same key + Bin ID on another device to sync down.";
   }catch(e){s.textContent="Sync up failed: "+(e.message||e);}
