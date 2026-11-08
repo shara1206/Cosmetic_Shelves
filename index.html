@@ -384,6 +384,15 @@
     </div>
     <div class="hint" id="menuStatus" style="margin-top:10px"></div>
 
+    <h2 style="margin-top:22px">✂️ 抠图 · Remove backgrounds</h2>
+    <div class="hint" id="bcInfo" style="margin-bottom:10px"></div>
+    <div class="cutbar" id="bcBar" style="display:none;width:100%;margin:0 0 10px"><i id="bcFill"></i></div>
+    <div class="row2">
+      <button class="btn primary" id="bcStart" style="margin-bottom:0">✂️ Cut out all</button>
+      <button class="btn ghost" id="bcStop" style="margin-bottom:0;display:none">■ Stop</button>
+    </div>
+    <div class="hint" id="bcStatus" style="margin-top:8px"></div>
+
     <h2 style="margin-top:22px">🔔 Expiry reminders</h2>
     <div class="hint" style="margin-bottom:10px">Get notified about items near expiry. Works while the app is open (a phone notification appears once a day).</div>
     <div class="row2" style="align-items:flex-end">
@@ -439,7 +448,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.08b"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.08c"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -561,7 +570,7 @@ function fmtDate(s){
 /* ---------- state ---------- */
 let ITEMS=[]; let editId=null;
 let photo1=null, photo2=null;
-let photo1Cut=false, photo1Orig=null; // photo1 is a background-removed cutout / the original it was cut from (kept only while this form is open)
+let photo1Cut=false, photo1Orig=null, photo1Restored=false; // photo1 is a background-removed cutout / the original it was cut from (saved with the item so it can be restored)
 let viewMode=localStorage.getItem("viewMode")||"list";
 let TAB=localStorage.getItem("shelfTab")||"open";      // open = in use, sealed = unopened, finished = used up
 const statusOf=it=>(it.status==="open"||it.status==="finished")?it.status:"sealed"; // old/blank status counts as unopened
@@ -752,7 +761,7 @@ function showDetail(id){
     const copy={id:"it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
       brand:it.brand,name:it.name,category:it.category,type:it.type,location:it.location,barcode:it.barcode,
       pao:it.pao,shelf:it.shelf,status:"sealed",expiry:"",opened:"",mfg:"",lot:"",finished:"",repurchase:"",
-      purchase:todayISO(),qty:1,notes:"",photo1:it.photo1,photo1Cut:!!it.photo1Cut,photo2:null,created:Date.now()};
+      purchase:todayISO(),qty:1,notes:"",photo1:it.photo1,photo1Cut:!!it.photo1Cut,photo1Orig:it.photo1Orig||null,photo2:null,created:Date.now()};
     await putItem(copy);ITEMS=await allItems();close();refresh();
     showToast("Added a new unopened one — tap it in Unopened to set its expiry");
   };
@@ -762,7 +771,7 @@ function showToast(msg,action){
   if(!t){t=document.createElement("div");t.id="toast";
     t.style.cssText="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#2b2530;color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;z-index:60;max-width:90vw;text-align:center;box-shadow:var(--shadow);transition:opacity .3s;display:flex;gap:14px;align-items:center";
     document.body.appendChild(t);}
-  t.innerHTML=""; const sp=document.createElement("span"); sp.textContent=msg; t.appendChild(sp);
+  t._cut=false; t.innerHTML=""; const sp=document.createElement("span"); sp.textContent=msg; t.appendChild(sp);
   if(action){const b=document.createElement("button");b.textContent=action.label;
     b.style.cssText="background:none;border:none;color:#f5b8cb;font-weight:700;font-size:13px;padding:0;cursor:pointer";
     b.onclick=()=>{t.style.opacity="0";t.style.pointerEvents="none";action.fn();};t.appendChild(b);}
@@ -870,7 +879,7 @@ function openModal(it){
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
   g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
   photo1=it?.photo1||null; photo2=it?.photo2||null;
-  photo1Cut=!!(it&&it.photo1&&it.photo1Cut); photo1Orig=null;
+  photo1Cut=!!(it&&it.photo1&&it.photo1Cut); photo1Orig=(photo1Cut&&it.photo1Orig)||null; photo1Restored=false;
   setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎"); updateCutBtn();
   document.getElementById("brandChips").querySelectorAll(".chip").forEach(c=>
     c.classList.toggle("on",c.dataset.b===(it?.brand)));
@@ -888,7 +897,9 @@ function setPhotoBtn(id,data,ic){
   const b=document.getElementById(id);
   b.innerHTML=data?`<img src="${data}">`:`<span class="ic">${ic}</span><span class="t">Take photo</span>`;
 }
-function closeModal(){document.getElementById("modal").classList.remove("open");}
+function closeModal(){document.getElementById("modal").classList.remove("open");
+  const t=document.getElementById("toast"); if(t&&t._cut){t._cut=false;t.style.opacity="0";t.style.pointerEvents="none";} // its Undo only works while the form is open
+}
 
 /* image resize to keep storage small */
 function readImage(file,cb){
@@ -928,7 +939,9 @@ async function save(){
     mfg:document.getElementById("fMfg").value,
     shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
-    photo1, photo1Cut:!!(photo1&&photo1Cut), photo2, created:prev.created||Date.now()
+    photo1, photo1Cut:!!(photo1&&photo1Cut), photo1Orig:(photo1&&photo1Cut&&photo1Orig)||null,
+    cutSkip:photo1Cut?null:(photo1&&photo1Restored)?photo1.length:(prev.cutSkip||null), // you put the original back → batch leaves it alone
+    photo2, created:prev.created||Date.now()
   });
   await putItem(it); ITEMS=await allItems(); closeModal(); refresh();
 }
@@ -970,7 +983,7 @@ document.getElementById("sort").onchange=renderList;
 function updateViewToggle(){document.getElementById("viewToggle").textContent=viewMode==="gallery"?"☰ List":"▦ Gallery";}
 document.getElementById("viewToggle").onclick=()=>{viewMode=viewMode==="gallery"?"list":"gallery";localStorage.setItem("viewMode",viewMode);updateViewToggle();renderList();};
 updateViewToggle();
-function handleP1(file){ if(file)readImage(file,d=>{photo1=d;photo1Cut=false;photo1Orig=null;setPhotoBtn("p1btn",d);updateCutBtn();if(!document.getElementById("fName").value)readProductPhoto(true);}); }
+function handleP1(file){ if(file)readImage(file,d=>{photo1=d;photo1Cut=false;photo1Orig=null;photo1Restored=false;setPhotoBtn("p1btn",d);updateCutBtn();if(!document.getElementById("fName").value)readProductPhoto(true);}); }
 function handleP2(file){ if(file)readImage(file,d=>{photo2=d;setPhotoBtn("p2btn",d);readPhoto2();}); }
 document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
 document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
@@ -1631,7 +1644,7 @@ try{localStorage.removeItem("cloudKey");localStorage.removeItem("cloudBin");}cat
 /* hook settings-open to refresh these panels + run reminder check on load */
 const _menuBtn=document.getElementById("menuBtn");
 const _origMenu=_menuBtn.onclick;
-_menuBtn.onclick=()=>{_origMenu();updateRemUI();updateBackupUI();};
+_menuBtn.onclick=()=>{_origMenu();updateRemUI();updateBackupUI();updateBatchUI();};
 window.addEventListener("load",()=>{setTimeout(()=>checkReminders(false),1500);});
 
 /* ================= PHASE 5: 抠图 · cut out the main product (background removal) =================
@@ -1689,13 +1702,32 @@ function cutWorker(){
   w.onerror=e=>{ if(e&&e.preventDefault) e.preventDefault(); cutReset((e&&e.message)||"The cut-out engine couldn't start."); };
   return CUT.w=w;
 }
-function cutSegment(rgb,w,h,onProgress,onRunning){
-  clearTimeout(CUT.idle);
-  return new Promise((resolve,reject)=>{
-    const id=++CUT.seq;
-    CUT.jobs[id]={resolve,reject,onProgress,onRunning};
-    cutWorker().postMessage({id,cfg:{tjs:CUT_TJS,model:CUT_MODEL},rgb:rgb.buffer,w,h},[rgb.buffer]);
-  }).finally(()=>{ clearTimeout(CUT.idle); CUT.idle=setTimeout(()=>cutReset(),120000); }); // free memory after 2 idle minutes
+CUT.q=Promise.resolve();
+function cutSegment(rgb,w,h,onProgress,onRunning){ // one photo at a time through the worker (batch + single share it)
+  const run=()=>{
+    clearTimeout(CUT.idle);
+    return new Promise((resolve,reject)=>{
+      const id=++CUT.seq;
+      CUT.jobs[id]={resolve,reject,onProgress,onRunning};
+      cutWorker().postMessage({id,cfg:{tjs:CUT_TJS,model:CUT_MODEL},rgb:rgb.buffer,w,h},[rgb.buffer]);
+    }).finally(()=>{ clearTimeout(CUT.idle); CUT.idle=setTimeout(()=>cutReset(),120000); }); // free memory after 2 idle minutes
+  };
+  const p=CUT.q.then(run,run); CUT.q=p.catch(()=>{}); return p;
+}
+/* photo → pixels for the model (RGB) and for compositing (RGBA), ≤1024 px */
+async function cutPrep(src){
+  const img=await cutLoadImg(src);
+  const sc=Math.min(1,1024/Math.max(img.naturalWidth,img.naturalHeight));
+  const w=Math.max(1,Math.round(img.naturalWidth*sc)), h=Math.max(1,Math.round(img.naturalHeight*sc));
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const ctx=c.getContext("2d",{willReadFrequently:true}); ctx.drawImage(img,0,0,w,h);
+  const rgba=ctx.getImageData(0,0,w,h).data, rgb=new Uint8ClampedArray(w*h*3);
+  for(let i=0,j=0;i<rgba.length;i+=4,j+=3){rgb[j]=rgba[i];rgb[j+1]=rgba[i+1];rgb[j+2]=rgba[i+2];}
+  return {img,w,h,rgba,rgb};
+}
+function cutConsent(extra){
+  return localStorage.getItem("cutModel")===CUT_MODEL ||
+    confirm("✂️ 抠图 runs on your phone — photos are never uploaded.\n\nThe first time, it downloads a ~"+CUT_MB+" MB model (only once; Wi-Fi recommended)."+(extra||"")+" Continue?");
 }
 
 /* ---- mask → "main item" ---- */
@@ -1777,9 +1809,9 @@ function cutExport(S){
 const $c=id=>document.getElementById(id);
 function updateCutBtn(){
   const b=$c("p1cutBtn");
-  const show=!!photo1&&(!photo1Cut||!!photo1Orig);  // an already-cut photo can only be undone in the same session
+  const show=!!photo1&&(!photo1Cut||!!photo1Orig);  // cut photos from before originals were kept can't be restored
   b.style.display=show?"block":"none";
-  b.textContent=photo1Orig?"↩ Undo cutout":"✂️ 抠图 · Remove background";
+  b.textContent=photo1Orig?"↩ Restore original photo":"✂️ 抠图 · Remove background";
 }
 function cutBusy(msg,frac){
   $c("cutBusy").style.display=msg?"flex":"none";
@@ -1819,20 +1851,15 @@ function cutPick(S,x,y){ // nearest detected item to a tap
 async function openCutout(){
   if(!photo1){alert("Take or choose the product photo first.");return;}
   if(!window.Worker){alert("This browser can't run the cut-out tool.");return;}
-  if(localStorage.getItem("cutModel")!==CUT_MODEL &&
-     !confirm("✂️ 抠图 runs on your phone — the photo is never uploaded.\n\nThe first time, it downloads a ~"+CUT_MB+" MB model (only once; Wi-Fi recommended). Continue?")) return;
+  if(!cutConsent()) return;
   const token=++CUT.seq; CUT.active=token; CUT.src=photo1; CUT.S=null;
   const firstRun=localStorage.getItem("cutModel")!==CUT_MODEL;
   const cv=$c("cutCanvas");
-  $c("cutUse").disabled=true; cutHint(""); cutBusy("Starting…");
+  $c("cutUse").disabled=true; cutHint(""); cutBusy(BATCH.running?"Waiting for the batch cut-out to finish its current photo…":"Starting…");
   $c("cutModal").classList.add("open"); $c("cutModal").querySelector(".sheet").scrollTop=0;
   try{
-    const img=await cutLoadImg(photo1);
-    const sc=Math.min(1,1024/Math.max(img.naturalWidth,img.naturalHeight));
-    const w=Math.max(1,Math.round(img.naturalWidth*sc)), h=Math.max(1,Math.round(img.naturalHeight*sc));
-    cv.width=w; cv.height=h; const ctx=cv.getContext("2d"); ctx.drawImage(img,0,0,w,h);
-    const rgba=ctx.getImageData(0,0,w,h).data, rgb=new Uint8ClampedArray(w*h*3);
-    for(let i=0,j=0;i<rgba.length;i+=4,j+=3){rgb[j]=rgba[i];rgb[j+1]=rgba[i+1];rgb[j+2]=rgba[i+2];}
+    const {img,w,h,rgba,rgb}=await cutPrep(photo1);
+    cv.width=w; cv.height=h; cv.getContext("2d").drawImage(img,0,0,w,h);
     const t0=Date.now();
     const r=await cutSegment(rgb,w,h,
       p=>{ if(CUT.active===token&&p.total) cutBusy((firstRun?"Downloading cut-out model (once)… ":"Loading cut-out model… ")+(p.loaded/1e6).toFixed(0)+" / "+(p.total/1e6).toFixed(0)+" MB",p.loaded/p.total); },
@@ -1861,13 +1888,13 @@ function cutApply(){
   const S=CUT.S; if(!S||!S.box) return;
   const out=cutExport(S);
   if(!photo1Orig) photo1Orig=CUT.src;
-  photo1=out; photo1Cut=true;
+  photo1=out; photo1Cut=true; photo1Restored=false;
   setPhotoBtn("p1btn",photo1,"📷"); updateCutBtn(); cutClose();
-  showToast("✂️ Background removed",{label:"Undo",fn:cutUndo});
+  showToast("✂️ Background removed",{label:"Undo",fn:cutUndo}); $c("toast")._cut=true;
 }
 function cutUndo(){
   if(!photo1Orig) return;
-  photo1=photo1Orig; photo1Orig=null; photo1Cut=false;
+  photo1=photo1Orig; photo1Orig=null; photo1Cut=false; photo1Restored=true;
   setPhotoBtn("p1btn",photo1,"📷"); updateCutBtn();
 }
 $c("p1cutBtn").onclick=()=>{ if(photo1Orig) cutUndo(); else openCutout(); };
@@ -1882,6 +1909,98 @@ $c("cutCanvas").addEventListener("click",e=>{
   const id=cutPick(S,x,y);
   if(!id){ cutHint("Nothing detected there — tap right on a product (or use ✓ to keep the current one)."); return; }
   S.main=id; S.all=false; cutDraw();
+});
+
+/* ---- batch: cut out every product photo that still has a background (⚙ Settings) ----
+   Auto-keeps the main item. Originals are saved on the item (photo1Orig) so any result can be
+   put back from Edit. A photo is skipped next time (cutSkip = its length as a cheap fingerprint)
+   if nothing could be found in it, or if you restored its original by hand. */
+const BATCH={running:false,stop:false,done:0,total:0,ok:0,fail:[],multi:[],t0:0,cur:"",wake:null};
+const BATCH_ORDER={open:0,sealed:1,finished:2};
+const cutSkipped=it=>!!it.photo1&&!it.photo1Cut&&it.cutSkip===it.photo1.length;
+function batchTodo(){
+  return ITEMS.filter(it=>it.photo1&&!it.photo1Cut&&!cutSkipped(it))
+    .sort((a,b)=>BATCH_ORDER[statusOf(a)]-BATCH_ORDER[statusOf(b)]);
+}
+function fmtSecs(s){ s=Math.max(1,Math.round(s)); return s<90?s+" s":Math.round(s/60)+" min"; }
+function itemLabel(it){ return ((it.brand?it.brand+" ":"")+(it.name||"Untitled")).trim(); }
+function updateBatchUI(){
+  const B=BATCH;
+  $c("bcStart").style.display=B.running?"none":"block";
+  $c("bcStop").style.display=B.running?"block":"none";
+  $c("bcBar").style.display=B.running?"block":"none";
+  if(B.running){
+    $c("bcFill").style.width=Math.round(B.done/B.total*100)+"%";
+    const per=B.done?(Date.now()-B.t0)/B.done/1000:null;
+    $c("bcInfo").innerHTML=`Working… <b>${B.done} / ${B.total}</b>${per?" · about "+fmtSecs(per*(B.total-B.done))+" left":""}`+
+      `<br>Now: ${esc(B.cur)}<br>Keep the app open with the screen on. You can close this sheet and watch your shelves update.`;
+    $c("bcStop").disabled=B.stop; $c("bcStop").textContent=B.stop?"Stopping after this photo…":"■ Stop";
+    return;
+  }
+  const n=batchTodo().length, skipped=ITEMS.filter(cutSkipped).length;
+  $c("bcStart").disabled=!n;
+  $c("bcStart").textContent=n?"✂️ Cut out all "+n:"✓ Nothing left to cut out";
+  $c("bcInfo").innerHTML=(n
+    ?`<b>${n}</b> product photo${n>1?"s":""} still ${n>1?"have":"has"} a background. Runs on this phone, roughly 10–30 s each (in use → unopened → finished). `+
+     `The main item is kept automatically; originals are saved, so any photo can be put back via <b>Edit → ↩ Restore original photo</b>.`
+    :skipped?"Nothing left to cut out automatically.":"All product photos are cut out.")+
+    (skipped?`<br>${skipped} skipped (no clear product found, or you restored the original) — use ✂️ in Edit for ${skipped>1?"those":"that one"}.`:"");
+}
+async function runBatch(){
+  if(BATCH.running) return;
+  const todo=batchTodo(); if(!todo.length) return;
+  if(!cutConsent("\n\n"+todo.length+" photo"+(todo.length>1?"s":"")+" · roughly "+fmtSecs(todo.length*20)+" on a phone")) return;
+  Object.assign(BATCH,{running:true,stop:false,done:0,total:todo.length,ok:0,fail:[],multi:[],t0:Date.now(),cur:""});
+  const st=$c("bcStatus"); st.textContent="";
+  try{ if(navigator.wakeLock) BATCH.wake=await navigator.wakeLock.request("screen"); }catch(_){}
+  updateBatchUI();
+  let fatal=null;
+  for(const it0 of todo){
+    if(BATCH.stop) break;
+    BATCH.cur=itemLabel(it0); updateBatchUI();
+    let prep=null; try{ prep=await cutPrep(it0.photo1); }catch(_){}
+    let r=null, S=null;
+    if(prep){
+      try{
+        r=await cutSegment(prep.rgb,prep.w,prep.h,
+          p=>{ if(p.total) st.textContent="Loading cut-out model… "+(p.loaded/1e6).toFixed(0)+" / "+(p.total/1e6).toFixed(0)+" MB"; },
+          ()=>{ st.textContent=""; });
+      }catch(e){ fatal=e; break; }      // engine/network problem: stop rather than fail every photo
+      try{localStorage.setItem("cutModel",CUT_MODEL);}catch(_){}
+      if(r.w===prep.w&&r.h===prep.h) S=cutAnalyze(r.mask,prep.w,prep.h);
+      if(S){ Object.assign(S,{img:prep.img,rgba:prep.rgba}); cutCompose(S); }
+    }
+    const cur=ITEMS.find(x=>x.id===it0.id);
+    if(cur&&cur.photo1===it0.photo1&&!cur.photo1Cut){   // skip if it was edited meanwhile
+      if(S&&S.box){
+        await putItem(Object.assign({},cur,{photo1:cutExport(S),photo1Cut:true,photo1Orig:cur.photo1,cutSkip:null}));
+        BATCH.ok++; if(S.real.length>1) BATCH.multi.push(BATCH.cur);
+      }else{
+        await putItem(Object.assign({},cur,{cutSkip:cur.photo1.length}));
+        BATCH.fail.push(BATCH.cur);
+      }
+      ITEMS=await allItems(); refresh();
+    }
+    BATCH.done++; updateBatchUI();
+  }
+  try{ if(BATCH.wake) BATCH.wake.release(); }catch(_){}
+  const B=BATCH; B.wake=null; B.running=false;
+  const list=a=>a.slice(0,5).map(esc).join(", ")+(a.length>5?" +"+(a.length-5)+" more":"");
+  st.innerHTML=(fatal
+      ?"⚠️ Stopped: "+esc(fatal.message||fatal)+(localStorage.getItem("cutModel")!==CUT_MODEL?" — needs internet the first time.":"")+"<br>"
+      :B.stop?"Stopped. ":"")+
+    `✓ Cut out <b>${B.ok}</b> photo${B.ok===1?"":"s"}.`+
+    (B.multi.length?`<br>🔍 Had more than one item — main one kept, worth a glance: ${list(B.multi)}`:"")+
+    (B.fail.length?`<br>😕 No clear product found (left as is): ${list(B.fail)}`:"");
+  updateBatchUI();
+  if(!$c("menuModal").classList.contains("open")) showToast("✂️ Batch done — "+B.ok+" photo"+(B.ok===1?"":"s")+" cut out");
+}
+$c("bcStart").onclick=runBatch;
+$c("bcStop").onclick=()=>{ BATCH.stop=true; updateBatchUI(); };
+document.addEventListener("visibilitychange",async()=>{ // the screen lock is dropped when the app is hidden — take it back
+  if(BATCH.running&&!BATCH.stop&&document.visibilityState==="visible"&&navigator.wakeLock){
+    try{ BATCH.wake=await navigator.wakeLock.request("screen"); }catch(_){}
+  }
 });
 </script>
 <script>
