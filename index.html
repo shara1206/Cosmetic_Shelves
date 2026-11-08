@@ -71,6 +71,17 @@
   .fab{position:fixed;right:18px;bottom:18px;width:58px;height:58px;border-radius:50%;
     background:var(--pink);color:#fff;border:none;font-size:30px;box-shadow:0 6px 18px rgba(180,90,120,.4);
     z-index:30;display:flex;align-items:center;justify-content:center}
+  /* backup reminder: banner beside the FAB + dot on the settings button */
+  #bkBanner{position:fixed;left:12px;right:88px;bottom:18px;z-index:30;display:none;align-items:center;gap:10px;
+    background:#2b2530;color:#fff;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.3;
+    box-shadow:0 6px 18px rgba(0,0,0,.22)}
+  #bkBanner.show{display:flex}
+  #bkBanner .msg{flex:1}
+  #bkBanner button{border:none;border-radius:9px;font-size:13px;font-weight:700;padding:8px 10px;cursor:pointer;flex:none}
+  #bkBanner .go{background:var(--pink);color:#fff}
+  #bkBanner .later{background:none;color:#f5b8cb;padding:8px 2px}
+  #menuBtn.due::after{content:"";position:absolute;top:3px;right:3px;width:10px;height:10px;border-radius:50%;
+    background:var(--amber);border:2px solid var(--pink)}
   /* modal */
   .modal{position:fixed;inset:0;background:rgba(30,20,28,.45);z-index:40;display:none;
     align-items:flex-end;justify-content:center}
@@ -363,7 +374,8 @@
 <div class="modal" id="menuModal">
   <div class="sheet">
     <div class="sheethead"><h2>Backup &amp; data</h2><button class="xbtn" id="menuX" aria-label="Close">✕</button></div>
-    <div class="hint" style="margin-bottom:14px">Your inventory is stored only on this device. Back it up regularly so you don't lose it.</div>
+    <div class="hint" style="margin-bottom:6px">Your inventory is stored only on this device. Back it up regularly so you don't lose it — you'll get a reminder once more than 10 products have changed since the last backup.</div>
+    <div class="hint" id="bkInfo" style="margin-bottom:14px;font-weight:600"></div>
     <div class="btns" style="flex-direction:column">
       <button class="btn primary" id="expJson" style="margin-bottom:10px">⬇ Backup all (JSON, incl. photos)</button>
       <button class="btn ghost" id="expCsv" style="margin-bottom:10px">⬇ Export list (CSV, no photos)</button>
@@ -390,16 +402,6 @@
       <button class="btn primary" id="remToggle" style="flex:none;padding:11px 14px;margin-bottom:0">Enable</button>
     </div>
     <div class="hint" id="remStatus" style="margin-top:8px"></div>
-
-    <h2 style="margin-top:22px">☁️ Cloud sync (optional)</h2>
-    <div class="hint" style="margin-bottom:10px">Sync your inventory to the cloud so it's safe if you lose your phone, and available on another device. Uses a free <b>jsonbin.io</b> account — sign up, copy your <b>Master Key</b>, paste it below. Leave Bin ID empty the first time and I'll create one.</div>
-    <div class="field"><label>JSONBin Master Key</label><input id="cloudKey" placeholder="$2a$10$…" autocomplete="off"></div>
-    <div class="field"><label>Bin ID (auto-filled after first upload)</label><input id="cloudBin" placeholder="created automatically" autocomplete="off"></div>
-    <div class="row2">
-      <button class="btn primary" id="cloudUp" style="margin-bottom:0">⬆ Sync up</button>
-      <button class="btn ghost" id="cloudDown" style="margin-bottom:0">⬇ Sync down</button>
-    </div>
-    <div class="hint" id="cloudStatus" style="margin-top:8px"></div>
 
     <div class="btns" style="flex-direction:column;margin-top:20px">
       <button class="btn ghost" id="menuClose">Close</button>
@@ -437,7 +439,7 @@
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.08a"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.08b"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -459,8 +461,50 @@ function openDB(){return new Promise((res,rej)=>{
   r.onerror=e=>rej(e);
 });}
 function tx(mode){return db.transaction("items",mode).objectStore("items");}
-function putItem(it){return new Promise(r=>{tx("readwrite").put(it).onsuccess=()=>r();});}
-function delItem(id){return new Promise(r=>{tx("readwrite").delete(id).onsuccess=()=>r();});}
+/* quiet=true → don't count toward the backup reminder (used by restore) */
+function putItem(it,quiet){
+  const before=quiet?null:ITEMS.find(x=>x.id===it.id);
+  return new Promise(r=>{tx("readwrite").put(it).onsuccess=()=>{if(!quiet&&!sameItem(before,it))markChanged(it.id);r();};});
+}
+function delItem(id,quiet){return new Promise(r=>{tx("readwrite").delete(id).onsuccess=()=>{if(!quiet)markChanged(id);r();};});}
+
+/* ---------- backup reminder: distinct products changed since the last JSON backup ---------- */
+const BACKUP_REMIND_OVER=10;   // remind once MORE than this many different products have changed
+let BK={dirty:[],last:""};     // dirty = ids added/edited/deleted since the last backup; last = ISO time of that backup
+try{BK=Object.assign(BK,JSON.parse(localStorage.getItem("backupState")||"{}"));}catch(_){}
+if(!Array.isArray(BK.dirty))BK.dirty=[];
+let BK_LATER=false;            // "Later" hides the banner until the app is opened again (the ⚙ dot stays)
+function saveBk(){try{localStorage.setItem("backupState",JSON.stringify(BK));}catch(_){}}
+/* opening an item and saving it untouched shouldn't count as a change */
+function sameItem(a,b){
+  if(!a||!b)return false;
+  for(const k of new Set([...Object.keys(a),...Object.keys(b)])){
+    if((a[k]==null?"":String(a[k]))!==(b[k]==null?"":String(b[k])))return false;
+  }
+  return true;
+}
+function markChanged(id){
+  if(id&&!BK.dirty.includes(id)){BK.dirty.push(id);saveBk();}
+  updateBackupUI();
+}
+function updateBackupUI(){
+  const n=BK.dirty.length, due=n>BACKUP_REMIND_OVER;
+  const mb=document.getElementById("menuBtn"); if(mb)mb.classList.toggle("due",due);
+  const info=document.getElementById("bkInfo");
+  if(info)info.textContent=(BK.last?"Last backup: "+new Date(BK.last).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}):"No backup made yet")
+    +" · "+n+" product"+(n===1?"":"s")+" changed since"+(due?" — time to back up":"");
+  let b=document.getElementById("bkBanner");
+  if(!due||BK_LATER){if(b)b.classList.remove("show");return;}
+  if(!b){
+    b=document.createElement("div");b.id="bkBanner";
+    b.innerHTML='<span class="msg"></span><button class="go">Back up</button><button class="later">Later</button>';
+    b.querySelector(".go").onclick=()=>exportJson();
+    b.querySelector(".later").onclick=()=>{BK_LATER=true;updateBackupUI();};
+    document.body.appendChild(b);
+  }
+  b.querySelector(".msg").textContent="📦 "+n+" products changed since your last backup";
+  b.classList.add("show");
+}
 function allItems(){return new Promise(r=>{tx("readonly").getAll().onsuccess=e=>r(e.target.result);});}
 
 /* ---------- expiry logic (year-month friendly) ---------- */
@@ -946,7 +990,7 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelect
 
 document.getElementById("appVer").textContent=APP_VERSION;
 (async function init(){
-  await openDB(); buildSelects(); ITEMS=await allItems(); refresh();
+  await openDB(); buildSelects(); ITEMS=await allItems(); refresh(); updateBackupUI();
 })();
 
 /* ================= PHASE 2: barcode scan + lookup + OCR ================= */
@@ -1490,7 +1534,9 @@ function stamp(){return new Date().toISOString().slice(0,10);}
 function exportJson(){
   const payload={app:"cosmetic-inventory",version:1,exported:new Date().toISOString(),items:ITEMS};
   downloadFile("cosmetic-inventory-backup-"+stamp()+".json","application/json",JSON.stringify(payload));
+  BK={dirty:[],last:new Date().toISOString()}; BK_LATER=false; saveBk(); updateBackupUI();
   document.getElementById("menuStatus").textContent="✓ Backup downloaded ("+ITEMS.length+" items).";
+  showToast("✓ Backup saved to Downloads ("+ITEMS.length+" items)");
 }
 function csvCell(v){v=(v==null?"":String(v));return '"'+v.replace(/"/g,'""')+'"';}
 function exportCsv(){
@@ -1513,10 +1559,14 @@ async function importJson(file){
     }
     if(!mode){ // replace
       const cur=await allItems();
-      await Promise.all(cur.map(i=>delItem(i.id)));
+      await Promise.all(cur.map(i=>delItem(i.id,true)));
     }
     let n=0;
-    for(const it of items){ if(it&&it.id){await putItem(it);n++;} }
+    for(const it of items){ if(it&&it.id){await putItem(it,true);n++;} }
+    // whatever came from the file is already backed up (it IS the backup)
+    if(!mode) BK.dirty=[];
+    else { const fromFile=new Set(items.map(i=>i&&i.id)); BK.dirty=BK.dirty.filter(id=>!fromFile.has(id)); }
+    saveBk(); updateBackupUI();
     ITEMS=await allItems(); refresh();
     s.textContent="✓ Restored "+n+" items ("+(mode?"merged":"replaced")+").";
   }catch(e){s.textContent="Restore failed: "+(e.message||e);}
@@ -1530,7 +1580,7 @@ document.getElementById("expCsv").onclick=exportCsv;
 document.getElementById("impBtn").onclick=()=>document.getElementById("impFile").click();
 document.getElementById("impFile").onchange=e=>{if(e.target.files[0])importJson(e.target.files[0]);e.target.value="";};
 
-/* ================= PHASE 4: reminders + cloud sync ================= */
+/* ================= PHASE 4: expiry reminders ================= */
 
 /* ---- expiry reminders (Notification API) ---- */
 let REM={on:false,days:210};
@@ -1575,55 +1625,13 @@ function checkReminders(force){
 document.getElementById("remDays").onchange=e=>{REM.days=parseInt(e.target.value);saveRem();updateRemUI();};
 document.getElementById("remToggle").onclick=toggleReminders;
 
-/* ---- cloud sync via JSONBin ---- */
-const CLOUD={key:localStorage.getItem("cloudKey")||"",bin:localStorage.getItem("cloudBin")||""};
-function loadCloudUI(){document.getElementById("cloudKey").value=CLOUD.key;document.getElementById("cloudBin").value=CLOUD.bin;}
-function readCloudInputs(){
-  CLOUD.key=document.getElementById("cloudKey").value.trim();
-  CLOUD.bin=document.getElementById("cloudBin").value.trim();
-  localStorage.setItem("cloudKey",CLOUD.key);localStorage.setItem("cloudBin",CLOUD.bin);
-}
-async function cloudUp(){
-  readCloudInputs();
-  const s=document.getElementById("cloudStatus");
-  if(!CLOUD.key){s.textContent="Paste your JSONBin Master Key first.";return;}
-  const payload={app:"cosmetic-inventory",updated:new Date().toISOString(),items:ITEMS};
-  s.textContent="Uploading "+ITEMS.length+" items…";
-  try{
-    let url,method;
-    if(CLOUD.bin){url="https://api.jsonbin.io/v3/b/"+CLOUD.bin;method="PUT";}
-    else{url="https://api.jsonbin.io/v3/b";method="POST";}
-    const r=await fetch(url,{method,headers:{"Content-Type":"application/json","X-Master-Key":CLOUD.key,"X-Bin-Private":"true","X-Bin-Name":"cosmetic-inventory"},body:JSON.stringify(payload)});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error((j.message||("HTTP "+r.status))+(r.status===413||/size|large/i.test(j.message||"")?" — the backup is too big for JSONBin's free plan (photos take a lot of space). Use the JSON backup file instead.":""));
-    if(!CLOUD.bin){CLOUD.bin=(j.metadata&&j.metadata.id)||"";document.getElementById("cloudBin").value=CLOUD.bin;localStorage.setItem("cloudBin",CLOUD.bin);}
-    s.innerHTML="✓ Synced up ("+ITEMS.length+" items). Bin saved — use the same key + Bin ID on another device to sync down.";
-  }catch(e){s.textContent="Sync up failed: "+(e.message||e);}
-}
-async function cloudDown(){
-  readCloudInputs();
-  const s=document.getElementById("cloudStatus");
-  if(!CLOUD.key||!CLOUD.bin){s.textContent="Need both Master Key and Bin ID to sync down.";return;}
-  if(!confirm("This replaces your current data with the cloud copy. Continue?"))return;
-  s.textContent="Downloading…";
-  try{
-    const r=await fetch("https://api.jsonbin.io/v3/b/"+CLOUD.bin+"/latest",{headers:{"X-Master-Key":CLOUD.key}});
-    const j=await r.json();
-    if(!r.ok)throw new Error(j.message||("HTTP "+r.status));
-    const items=(j.record&&j.record.items)||[];
-    const cur=await allItems(); await Promise.all(cur.map(i=>delItem(i.id)));
-    for(const it of items){if(it&&it.id)await putItem(it);}
-    ITEMS=await allItems(); refresh();
-    s.textContent="✓ Synced down — "+items.length+" items loaded.";
-  }catch(e){s.textContent="Sync down failed: "+(e.message||e);}
-}
-document.getElementById("cloudUp").onclick=cloudUp;
-document.getElementById("cloudDown").onclick=cloudDown;
+/* cloud sync (JSONBin) was removed — drop any key/bin id an older version saved on this device */
+try{localStorage.removeItem("cloudKey");localStorage.removeItem("cloudBin");}catch(_){}
 
 /* hook settings-open to refresh these panels + run reminder check on load */
 const _menuBtn=document.getElementById("menuBtn");
 const _origMenu=_menuBtn.onclick;
-_menuBtn.onclick=()=>{_origMenu();updateRemUI();loadCloudUI();};
+_menuBtn.onclick=()=>{_origMenu();updateRemUI();updateBackupUI();};
 window.addEventListener("load",()=>{setTimeout(()=>checkReminders(false),1500);});
 
 /* ================= PHASE 5: 抠图 · cut out the main product (background removal) =================
