@@ -1,7 +1,7 @@
 /* Skincare Shelves - minimal service worker.
    Purpose: satisfy PWA installability and give the app an offline shell.
    Bump CACHE when you change the app so clients pick up the new version. */
-const CACHE = 'shelves-v6';
+const CACHE = 'shelves-v7';
 const SHELL = [
   './',
   './index.html',

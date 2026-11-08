@@ -140,6 +140,19 @@
   .tbcbar{display:flex;align-items:center;gap:8px;background:#fff8e6;border:1px dashed #e0a13a;border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;color:#7a5200;cursor:pointer}
   .tbcbar.on{background:#e0a13a;color:#fff;border-style:solid}
   .rep.yes{background:#e3f4ea;color:var(--green)} .rep.no{background:#fbe6e6;color:var(--red)} .rep.maybe{background:#fbf0dc;color:#b07a1e}
+  /* 抠图 · cut-out preview */
+  .cutstage{position:relative;border-radius:12px;overflow:hidden;margin-bottom:10px;min-height:120px;
+    background:#fff repeating-conic-gradient(#f1e9ec 0 25%,#fff 0 50%) 0 0/18px 18px}
+  .cutstage canvas{display:block;width:100%;height:auto;cursor:pointer}
+  .cutbusy{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+    background:rgba(250,246,245,.78);font-size:13px;font-weight:600;color:var(--ink);text-align:center;padding:16px}
+  .spin{width:30px;height:30px;border-radius:50%;border:3px solid #f0d7e0;border-top-color:var(--pink);animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .cutbar{width:70%;height:6px;border-radius:6px;background:#f0d7e0;overflow:hidden}
+  .cutbar>i{display:block;height:100%;width:0;background:var(--pink);transition:width .2s}
+  .linkbtn{background:none;border:none;padding:0;color:var(--pink-dark);font-weight:700;font-size:inherit;cursor:pointer;text-decoration:underline}
+  .bigphoto.cut{background:#fff}
+  .btn:disabled{opacity:.45}
 </style>
 </head>
 <body>
@@ -199,6 +212,7 @@
         <label>Product photo</label>
         <button class="photobtn" id="p1btn"><span class="ic">📷</span><span class="t">Take photo</span></button>
         <button type="button" class="albumbtn" id="p1albumBtn">🖼 Choose from album</button>
+        <button type="button" class="albumbtn" id="p1cutBtn" style="display:none">✂️ 抠图 · Remove background</button>
         <input type="file" id="p1" accept="image/*" capture="environment">
         <input type="file" id="p1album" accept="image/*">
       </div>
@@ -404,10 +418,26 @@
   </div>
 </div>
 
+<!-- 抠图 · cut-out preview modal -->
+<div class="modal" id="cutModal">
+  <div class="sheet">
+    <div class="sheethead"><h2>✂️ 抠图 · Cut out product</h2><button class="xbtn" id="cutX" aria-label="Close">✕</button></div>
+    <div class="cutstage">
+      <canvas id="cutCanvas"></canvas>
+      <div class="cutbusy" id="cutBusy"><div class="spin"></div><div id="cutMsg">Starting…</div><div class="cutbar" id="cutBar" style="display:none"><i id="cutBarFill"></i></div></div>
+    </div>
+    <div class="hint" id="cutHint" style="font-size:12px;min-height:16px"></div>
+    <div class="btns" style="margin-top:12px">
+      <button class="btn ghost" id="cutCancel">Keep original</button>
+      <button class="btn primary" id="cutUse" disabled>✓ Use cutout</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-const APP_VERSION="2026.11.05e"; // bump together with CACHE in sw.js when you change the app
+const APP_VERSION="2026.11.08a"; // bump together with CACHE in sw.js when you change the app
 /* ---------- data model ---------- */
 const CATEGORIES = ["Skincare","Makeup","Haircare","Fragrance","Body","Tools"];
 const SKIN_TYPES = ["Cleanser","Toner","Essence","Serum","Ampoule","Moisturizer / Cream",
@@ -487,6 +517,7 @@ function fmtDate(s){
 /* ---------- state ---------- */
 let ITEMS=[]; let editId=null;
 let photo1=null, photo2=null;
+let photo1Cut=false, photo1Orig=null; // photo1 is a background-removed cutout / the original it was cut from (kept only while this form is open)
 let viewMode=localStorage.getItem("viewMode")||"list";
 let TAB=localStorage.getItem("shelfTab")||"open";      // open = in use, sealed = unopened, finished = used up
 const statusOf=it=>(it.status==="open"||it.status==="finished")?it.status:"sealed"; // old/blank status counts as unopened
@@ -626,7 +657,7 @@ function showDetail(id){
     :`<button class="btn ghost" id="qReopen">↩ In use</button><button class="btn primary" id="qAgain">🛒 Bought again</button>`;
   document.getElementById("detailSheet").innerHTML=`
     <div class="sheethead"><h2>${esc(it.name||"Untitled")}</h2><button class="xbtn" id="dClose" aria-label="Close">✕</button></div>
-    ${it.photo1?`<img class="bigphoto" src="${esc(it.photo1)}">`:""}
+    ${it.photo1?`<img class="bigphoto${it.photo1Cut?" cut":""}" src="${esc(it.photo1)}">`:""}
     ${it.photo2?`<img class="bigphoto" src="${esc(it.photo2)}">`:""}
     ${row("Brand",it.brand)}
     ${row("📍 Location",it.location)}
@@ -677,7 +708,7 @@ function showDetail(id){
     const copy={id:"it_"+Date.now()+"_"+Math.random().toString(36).slice(2,6),
       brand:it.brand,name:it.name,category:it.category,type:it.type,location:it.location,barcode:it.barcode,
       pao:it.pao,shelf:it.shelf,status:"sealed",expiry:"",opened:"",mfg:"",lot:"",finished:"",repurchase:"",
-      purchase:todayISO(),qty:1,notes:"",photo1:it.photo1,photo2:null,created:Date.now()};
+      purchase:todayISO(),qty:1,notes:"",photo1:it.photo1,photo1Cut:!!it.photo1Cut,photo2:null,created:Date.now()};
     await putItem(copy);ITEMS=await allItems();close();refresh();
     showToast("Added a new unopened one — tap it in Unopened to set its expiry");
   };
@@ -795,7 +826,8 @@ function openModal(it){
   g("fLot").value=it?.lot||""; g("fQty").value=it?.qty||1;
   g("fBarcode").value=it?.barcode||""; g("fNotes").value=it?.notes||"";
   photo1=it?.photo1||null; photo2=it?.photo2||null;
-  setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎");
+  photo1Cut=!!(it&&it.photo1&&it.photo1Cut); photo1Orig=null;
+  setPhotoBtn("p1btn",photo1,"📷"); setPhotoBtn("p2btn",photo2,"🔎"); updateCutBtn();
   document.getElementById("brandChips").querySelectorAll(".chip").forEach(c=>
     c.classList.toggle("on",c.dataset.b===(it?.brand)));
   toggleTypeField(); toggleFinishedFields(); updateCalcExp();
@@ -852,7 +884,7 @@ async function save(){
     mfg:document.getElementById("fMfg").value,
     shelf:document.getElementById("fShelf").value,
     lot:g("fLot"), qty:g("fQty")||1, barcode:g("fBarcode"), notes:g("fNotes"),
-    photo1, photo2, created:prev.created||Date.now()
+    photo1, photo1Cut:!!(photo1&&photo1Cut), photo2, created:prev.created||Date.now()
   });
   await putItem(it); ITEMS=await allItems(); closeModal(); refresh();
 }
@@ -876,7 +908,7 @@ document.getElementById("formX").onclick=closeModal;
     if(ignorePop){ignorePop=false;return;}
     const m=top(); if(!m)return;
     entry=false; fromPop=true;
-    if(m.id==="scanModal")stopScan(); else m.classList.remove("open");
+    if(m.id==="scanModal")stopScan(); else if(m.id==="cutModal")cutClose(); else m.classList.remove("open");
   });
 })();
 document.getElementById("saveBtn").onclick=save;
@@ -894,7 +926,7 @@ document.getElementById("sort").onchange=renderList;
 function updateViewToggle(){document.getElementById("viewToggle").textContent=viewMode==="gallery"?"☰ List":"▦ Gallery";}
 document.getElementById("viewToggle").onclick=()=>{viewMode=viewMode==="gallery"?"list":"gallery";localStorage.setItem("viewMode",viewMode);updateViewToggle();renderList();};
 updateViewToggle();
-function handleP1(file){ if(file)readImage(file,d=>{photo1=d;setPhotoBtn("p1btn",d);if(!document.getElementById("fName").value)readProductPhoto(true);}); }
+function handleP1(file){ if(file)readImage(file,d=>{photo1=d;photo1Cut=false;photo1Orig=null;setPhotoBtn("p1btn",d);updateCutBtn();if(!document.getElementById("fName").value)readProductPhoto(true);}); }
 function handleP2(file){ if(file)readImage(file,d=>{photo2=d;setPhotoBtn("p2btn",d);readPhoto2();}); }
 document.getElementById("p1btn").onclick=()=>document.getElementById("p1").click();
 document.getElementById("p2btn").onclick=()=>document.getElementById("p2").click();
@@ -908,7 +940,7 @@ document.getElementById("ocrNameBtn").onclick=()=>readProductPhoto(false);
 document.getElementById("fName").oninput=()=>applyTypeGuess();
 document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
 document.getElementById("importFile").onchange=e=>{importScreenshots(e.target.files);e.target.value="";};
-document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".modal.open").forEach(m=>{if(m.id==="scanModal")stopScan();else m.classList.remove("open");});});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".modal.open").forEach(m=>{if(m.id==="scanModal")stopScan();else if(m.id==="cutModal")cutClose();else m.classList.remove("open");});});
 [document.getElementById("modal"),document.getElementById("detail")].forEach(m=>
   m.onclick=e=>{if(e.target===m)m.classList.remove("open");});
 
@@ -1073,7 +1105,8 @@ function preprocessForOCR(dataURL){
       const scale=Math.min(2.2, 1700/Math.max(img.width,img.height));
       const w=Math.max(1,Math.round(img.width*scale)), hh=Math.max(1,Math.round(img.height*scale));
       const c=document.createElement("canvas"); c.width=w; c.height=hh;
-      const ctx=c.getContext("2d"); ctx.drawImage(img,0,0,w,hh);
+      const ctx=c.getContext("2d"); ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,hh); // cut-out photos are transparent → read them on white, not black
+      ctx.drawImage(img,0,0,w,hh);
       try{
         const im=ctx.getImageData(0,0,w,hh), d=im.data;
         for(let i=0;i<d.length;i+=4){let g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; g=(g-128)*1.35+132; d[i]=d[i+1]=d[i+2]=g<0?0:g>255?255:g;}
@@ -1592,6 +1625,256 @@ const _menuBtn=document.getElementById("menuBtn");
 const _origMenu=_menuBtn.onclick;
 _menuBtn.onclick=()=>{_origMenu();updateRemUI();loadCloudUI();};
 window.addEventListener("load",()=>{setTimeout(()=>checkReminders(false),1500);});
+
+/* ================= PHASE 5: 抠图 · cut out the main product (background removal) =================
+   ISNet (salient-object segmentation) runs fully on the phone with Transformers.js inside a Web Worker,
+   so the photo never leaves the device and the UI stays responsive. The model (~44 MB) downloads once
+   from Hugging Face and is then cached by the browser (works offline afterwards).
+   Saved result: a square, transparent WebP (PNG fallback) with the product centred. */
+const CUT_TJS="https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+const CUT_MODEL="onnx-community/ISNet-ONNX";
+const CUT_MB=44;
+const CUT={w:null,seq:0,jobs:{},active:0,idle:null,S:null,src:null};
+
+/* worker body — stringified into a module worker, so it can't use anything from this page */
+function cutWorkerMain(){
+  let seg=null, T=null;
+  async function load(cfg){
+    if(seg) return seg;
+    T=T||await import(cfg.tjs);
+    T.env.allowLocalModels=false;
+    seg=await T.pipeline("image-segmentation",cfg.model,{device:"wasm",dtype:"q8",
+      progress_callback:p=>{ if(p.status==="progress_total") self.postMessage({type:"progress",loaded:p.loaded,total:p.total}); }});
+    return seg;
+  }
+  self.onmessage=async e=>{
+    const m=e.data;
+    try{
+      const s=await load(m.cfg);
+      self.postMessage({type:"running",id:m.id});
+      const out=await s(new T.RawImage(new Uint8ClampedArray(m.rgb),m.w,m.h,3));
+      const mk=out[0].mask, ch=mk.channels||1, n=mk.width*mk.height, a=new Uint8Array(n);
+      for(let i=0;i<n;i++) a[i]=mk.data[i*ch];
+      self.postMessage({type:"done",id:m.id,mask:a.buffer,w:mk.width,h:mk.height},[a.buffer]);
+    }catch(err){ seg=null; self.postMessage({type:"error",id:m.id,message:String((err&&err.message)||err)}); }
+  };
+}
+function cutReset(msg){ // kill the worker (frees ~200 MB) and fail anything still waiting on it
+  try{ if(CUT.w) CUT.w.terminate(); }catch(_){}
+  CUT.w=null;
+  for(const id in CUT.jobs) CUT.jobs[id].reject(new Error(msg||"stopped"));
+  CUT.jobs={};
+}
+function cutWorker(){
+  if(CUT.w) return CUT.w;
+  const url=URL.createObjectURL(new Blob(["("+cutWorkerMain.toString()+")()"],{type:"text/javascript"}));
+  const w=new Worker(url,{type:"module"});
+  w.onmessage=e=>{
+    const m=e.data;
+    if(m.type==="progress"){ for(const id in CUT.jobs) CUT.jobs[id].onProgress(m); return; }
+    const j=CUT.jobs[m.id]; if(!j) return;
+    if(m.type==="running"){ j.onRunning(); return; }
+    delete CUT.jobs[m.id];
+    if(m.type==="done") j.resolve({mask:new Uint8Array(m.mask),w:m.w,h:m.h});
+    else { j.reject(new Error(m.message)); cutReset(m.message); } // fresh worker next time (a failed import is otherwise sticky)
+  };
+  w.onerror=e=>{ if(e&&e.preventDefault) e.preventDefault(); cutReset((e&&e.message)||"The cut-out engine couldn't start."); };
+  return CUT.w=w;
+}
+function cutSegment(rgb,w,h,onProgress,onRunning){
+  clearTimeout(CUT.idle);
+  return new Promise((resolve,reject)=>{
+    const id=++CUT.seq;
+    CUT.jobs[id]={resolve,reject,onProgress,onRunning};
+    cutWorker().postMessage({id,cfg:{tjs:CUT_TJS,model:CUT_MODEL},rgb:rgb.buffer,w,h},[rgb.buffer]);
+  }).finally(()=>{ clearTimeout(CUT.idle); CUT.idle=setTimeout(()=>cutReset(),120000); }); // free memory after 2 idle minutes
+}
+
+/* ---- mask → "main item" ---- */
+function cutAnalyze(mask,w,h){
+  const n=w*h; let lo=255,hi=0;
+  for(let i=0;i<n;i++){const v=mask[i]; if(v<lo)lo=v; if(v>hi)hi=v;}
+  if(hi<64) return null;                                   // model found nothing salient
+  const alpha=new Uint8ClampedArray(n), sc=255/Math.max(1,hi-lo);
+  for(let i=0;i<n;i++){const v=(mask[i]-lo)*sc; alpha[i]=v<14?0:v;} // stretch to full range, drop faint haze
+  for(const thr of [128,64]){                              // 64 = second chance for glassy/translucent products
+    const lab=new Int32Array(n), stack=new Int32Array(n), comps=[null];
+    for(let i=0;i<n;i++){
+      if(alpha[i]<thr||lab[i]) continue;
+      const id=comps.length; let sp=0,area=0,sx=0,sy=0,x0=w,y0=h,x1=0,y1=0;
+      lab[i]=id; stack[sp++]=i;
+      while(sp){
+        const p=stack[--sp], x=p%w, y=(p-x)/w;
+        area++; sx+=x; sy+=y; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+        if(x>0   &&!lab[p-1]&&alpha[p-1]>=thr){lab[p-1]=id;stack[sp++]=p-1;}
+        if(x<w-1 &&!lab[p+1]&&alpha[p+1]>=thr){lab[p+1]=id;stack[sp++]=p+1;}
+        if(y>0   &&!lab[p-w]&&alpha[p-w]>=thr){lab[p-w]=id;stack[sp++]=p-w;}
+        if(y<h-1 &&!lab[p+w]&&alpha[p+w]>=thr){lab[p+w]=id;stack[sp++]=p+w;}
+      }
+      comps.push({id,area,cx:sx/area,cy:sy/area,x0,y0,x1,y1});
+    }
+    const real=comps.slice(1).filter(c=>c.area>=n*0.003);  // ignore specks
+    if(!real.length) continue;
+    const hd=Math.hypot(w/2,h/2);                          // main = biggest, nudged toward the centre
+    real.forEach(c=>c.score=c.area*(1-0.4*Math.hypot(c.cx-w/2,c.cy-h/2)/hd));
+    real.sort((a,b)=>b.score-a.score);
+    return {w,h,alpha,lab,comps,real,main:real[0].id,all:false};
+  }
+  return null;
+}
+/* gap between two bounding boxes in px (0 if they overlap) */
+function cutGap(a,b){ return Math.max(0,a.x0-b.x1,b.x0-a.x1,a.y0-b.y1,b.y0-a.y1); }
+/* a piece that belongs to item b: right next to it and 2–15% of its size (e.g. a cap split off by a reflection);
+   tinier = noise specks, bigger = a different product */
+function cutIsPart(c,b){ return c!==b && c.area>=b.area*0.02 && c.area<=b.area*0.15 && cutGap(c,b)<=0.06*Math.max(b.x1-b.x0,b.y1-b.y0); }
+/* which components to keep: the chosen item (or every item) + its parts */
+function cutKeep(S){
+  const base=S.all?S.real:[S.comps[S.main]], keep=new Uint8Array(S.comps.length);
+  for(const b of base){ keep[b.id]=1; for(const c of S.comps) if(c&&!keep[c.id]&&cutIsPart(c,b)) keep[c.id]=1; }
+  return keep;
+}
+function cutDilate(K,w,h,r){ // square dilation via running sums, rows then columns
+  const T=new Uint8Array(w*h), O=new Uint8Array(w*h), ps=new Int32Array(Math.max(w,h)+1);
+  for(let y=0;y<h;y++){const o=y*w; for(let x=0;x<w;x++) ps[x+1]=ps[x]+K[o+x];
+    for(let x=0;x<w;x++) T[o+x]=ps[Math.min(w,x+r+1)]-ps[Math.max(0,x-r)]>0?1:0;}
+  for(let x=0;x<w;x++){ for(let y=0;y<h;y++) ps[y+1]=ps[y]+T[y*w+x];
+    for(let y=0;y<h;y++) O[y*w+x]=ps[Math.min(h,y+r+1)]-ps[Math.max(0,y-r)]>0?1:0;}
+  return O;
+}
+/* RGBA canvas (full frame) with everything except the kept item(s) made transparent */
+function cutCompose(S){
+  const {w,h,alpha,lab}=S, n=w*h, keep=cutKeep(S), K=new Uint8Array(n);
+  for(let i=0;i<n;i++) if(lab[i]&&keep[lab[i]]) K[i]=1;
+  const G=cutDilate(K,w,h,Math.max(2,Math.round(Math.max(w,h)/200))); // keep the soft edge around the item
+  const id=new ImageData(new Uint8ClampedArray(S.rgba),w,h); let x0=w,y0=h,x1=-1,y1=-1;
+  for(let i=0;i<n;i++){
+    const a=G[i]?alpha[i]:0; id.data[i*4+3]=a;
+    if(a>24){const x=i%w,y=(i-x)/w; if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;}
+  }
+  const c=document.createElement("canvas"); c.width=w; c.height=h; c.getContext("2d").putImageData(id,0,0);
+  S.cut=c; S.box=x1<0?null:{x0,y0,x1,y1};
+  return c;
+}
+/* final saved image: square, product centred with a small margin, ≤800 px, transparent background */
+function cutExport(S){
+  const b=S.box, bw=b.x1-b.x0+1, bh=b.y1-b.y0+1, side=Math.ceil(Math.max(bw,bh)*1.12), out=Math.min(side,800), k=out/side;
+  const c=document.createElement("canvas"); c.width=c.height=out;
+  const ctx=c.getContext("2d"); ctx.imageSmoothingQuality="high";
+  ctx.drawImage(S.cut,b.x0,b.y0,bw,bh,(side-bw)/2*k,(side-bh)/2*k,bw*k,bh*k);
+  const webp=c.toDataURL("image/webp",0.86);
+  return webp.startsWith("data:image/webp")?webp:c.toDataURL("image/png");
+}
+
+/* ---- UI ---- */
+const $c=id=>document.getElementById(id);
+function updateCutBtn(){
+  const b=$c("p1cutBtn");
+  const show=!!photo1&&(!photo1Cut||!!photo1Orig);  // an already-cut photo can only be undone in the same session
+  b.style.display=show?"block":"none";
+  b.textContent=photo1Orig?"↩ Undo cutout":"✂️ 抠图 · Remove background";
+}
+function cutBusy(msg,frac){
+  $c("cutBusy").style.display=msg?"flex":"none";
+  if(!msg) return;
+  $c("cutMsg").textContent=msg;
+  $c("cutBar").style.display=frac==null?"none":"block";
+  if(frac!=null) $c("cutBarFill").style.width=Math.round(Math.min(1,frac)*100)+"%";
+}
+function cutHint(html){ $c("cutHint").innerHTML=html||""; }
+function cutLoadImg(src){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error("Couldn't open the photo"));i.src=src;});}
+function cutClose(){ CUT.active=0; clearInterval(CUT.tick); CUT.S=null; $c("cutModal").classList.remove("open"); }
+function cutDraw(){
+  const S=CUT.S, cv=$c("cutCanvas"), ctx=cv.getContext("2d");
+  cutCompose(S);
+  ctx.clearRect(0,0,S.w,S.h);
+  ctx.globalAlpha=0.2; ctx.drawImage(S.img,0,0,S.w,S.h); ctx.globalAlpha=1; // faint original so you can tap other items
+  ctx.drawImage(S.cut,0,0);
+  const n=S.real.length;
+  cutHint(n>1
+    ?(S.all?`Keeping all <b>${n}</b> items. <button class="linkbtn" id="cutOne">Keep only one</button>`
+           :`Found <b>${n}</b> items — kept the main one. Wrong one? <b>Tap the product you want</b> · <button class="linkbtn" id="cutAll">Keep all</button>`)
+    :"Faded parts will be removed. Tap <b>✓ Use cutout</b> to save it as the product photo.");
+  if($c("cutAll")) $c("cutAll").onclick=()=>{S.all=true;cutDraw();};
+  if($c("cutOne")) $c("cutOne").onclick=()=>{S.all=false;cutDraw();};
+  $c("cutUse").disabled=!S.box;
+}
+function cutPick(S,x,y){ // nearest detected item to a tap
+  const {w,h,lab,comps}=S, R=Math.round(Math.max(w,h)*0.03); let best=0,bd=1e9;
+  for(let dy=-R;dy<=R;dy+=2) for(let dx=-R;dx<=R;dx+=2){
+    const xx=x+dx,yy=y+dy; if(xx<0||yy<0||xx>=w||yy>=h) continue;
+    const l=lab[yy*w+xx], d=dx*dx+dy*dy; if(l&&d<bd){bd=d;best=l;}
+  }
+  if(!best) return 0;
+  const c=comps[best], host=S.real.find(r=>cutIsPart(c,r)); // tapped a cap/fragment → select the item it belongs to
+  return host?host.id:best;
+}
+async function openCutout(){
+  if(!photo1){alert("Take or choose the product photo first.");return;}
+  if(!window.Worker){alert("This browser can't run the cut-out tool.");return;}
+  if(localStorage.getItem("cutModel")!==CUT_MODEL &&
+     !confirm("✂️ 抠图 runs on your phone — the photo is never uploaded.\n\nThe first time, it downloads a ~"+CUT_MB+" MB model (only once; Wi-Fi recommended). Continue?")) return;
+  const token=++CUT.seq; CUT.active=token; CUT.src=photo1; CUT.S=null;
+  const firstRun=localStorage.getItem("cutModel")!==CUT_MODEL;
+  const cv=$c("cutCanvas");
+  $c("cutUse").disabled=true; cutHint(""); cutBusy("Starting…");
+  $c("cutModal").classList.add("open"); $c("cutModal").querySelector(".sheet").scrollTop=0;
+  try{
+    const img=await cutLoadImg(photo1);
+    const sc=Math.min(1,1024/Math.max(img.naturalWidth,img.naturalHeight));
+    const w=Math.max(1,Math.round(img.naturalWidth*sc)), h=Math.max(1,Math.round(img.naturalHeight*sc));
+    cv.width=w; cv.height=h; const ctx=cv.getContext("2d"); ctx.drawImage(img,0,0,w,h);
+    const rgba=ctx.getImageData(0,0,w,h).data, rgb=new Uint8ClampedArray(w*h*3);
+    for(let i=0,j=0;i<rgba.length;i+=4,j+=3){rgb[j]=rgba[i];rgb[j+1]=rgba[i+1];rgb[j+2]=rgba[i+2];}
+    const t0=Date.now();
+    const r=await cutSegment(rgb,w,h,
+      p=>{ if(CUT.active===token&&p.total) cutBusy((firstRun?"Downloading cut-out model (once)… ":"Loading cut-out model… ")+(p.loaded/1e6).toFixed(0)+" / "+(p.total/1e6).toFixed(0)+" MB",p.loaded/p.total); },
+      ()=>{ if(CUT.active!==token) return; const t1=Date.now(); clearInterval(CUT.tick);
+            const upd=()=>cutBusy("Finding the product… "+Math.round((Date.now()-t1)/1000)+" s");
+            upd(); CUT.tick=setInterval(()=>{ if(CUT.active===token) upd(); else clearInterval(CUT.tick); },1000); });
+    clearInterval(CUT.tick);
+    if(CUT.active!==token) return;                       // closed or restarted meanwhile
+    try{localStorage.setItem("cutModel",CUT_MODEL);}catch(_){}
+    if(r.w!==w||r.h!==h) throw new Error("unexpected mask size");
+    const S=cutAnalyze(r.mask,w,h);
+    if(!S){ cutBusy(""); cutHint("😕 Couldn't find a clear product in this photo. Try a closer shot with the product in the middle and a plain background."); return; }
+    Object.assign(S,{img,rgba}); CUT.S=S; CUT.ms=Date.now()-t0;
+    cutBusy(""); cutDraw();
+  }catch(e){
+    clearInterval(CUT.tick);
+    if(CUT.active!==token) return;
+    const offline=!navigator.onLine||/fetch|network|import|load/i.test(e.message||"");
+    cutBusy("");
+    cutHint("⚠️ "+(offline&&firstRun
+      ?"Needs internet the first time to download the cut-out model. Connect and try again."
+      :"Cut-out failed: "+esc(e.message||e)));
+  }
+}
+function cutApply(){
+  const S=CUT.S; if(!S||!S.box) return;
+  const out=cutExport(S);
+  if(!photo1Orig) photo1Orig=CUT.src;
+  photo1=out; photo1Cut=true;
+  setPhotoBtn("p1btn",photo1,"📷"); updateCutBtn(); cutClose();
+  showToast("✂️ Background removed",{label:"Undo",fn:cutUndo});
+}
+function cutUndo(){
+  if(!photo1Orig) return;
+  photo1=photo1Orig; photo1Orig=null; photo1Cut=false;
+  setPhotoBtn("p1btn",photo1,"📷"); updateCutBtn();
+}
+$c("p1cutBtn").onclick=()=>{ if(photo1Orig) cutUndo(); else openCutout(); };
+$c("cutUse").onclick=cutApply;
+$c("cutCancel").onclick=cutClose;
+$c("cutX").onclick=cutClose;
+$c("cutModal").addEventListener("click",e=>{ if(e.target.id==="cutModal") cutClose(); });
+$c("cutCanvas").addEventListener("click",e=>{
+  const S=CUT.S; if(!S) return;
+  const r=e.currentTarget.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)/r.width*S.w), y=Math.floor((e.clientY-r.top)/r.height*S.h);
+  const id=cutPick(S,x,y);
+  if(!id){ cutHint("Nothing detected there — tap right on a product (or use ✓ to keep the current one)."); return; }
+  S.main=id; S.all=false; cutDraw();
+});
 </script>
 <script>
 /* PWA: register the service worker so Android installs this as a real app
